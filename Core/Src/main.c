@@ -239,8 +239,19 @@ HAL_StatusTypeDef ADS1220_FullTest(void)
     }
     UART_Printf("     [OK]\r\n\r\n");
 
-    /* 4. 按 App/app_config.h 配置（写入与打印同源） */
-    UART_Printf("[4] Configuring from App/app_config.h...\r\n");
+    /* 4. 连通性自检：确认 SPI 写通路真正生效。
+     *    先写一个不同的值再回读，可覆盖"目标配置恰好等于芯片当前值"这种
+     *    仅靠回读比对无法发现的写通路故障。 */
+    UART_Printf("[4] Connection test...\r\n");
+    if (ADS1220_ConnectionTest(&hads) != HAL_OK)
+    {
+        UART_Printf("     [ERROR] Write/read probe failed - SPI write path broken\r\n");
+        return HAL_ERROR;
+    }
+    UART_Printf("     [OK] Write/read probe passed\r\n\r\n");
+
+    /* 5. 按 App/app_config.h 配置（写入与打印同源） */
+    UART_Printf("[5] Configuring from App/app_config.h...\r\n");
     if (ADS1220_Config(&hads,
                        APP_ADC_CHANNEL,
                        APP_ADC_GAIN,
@@ -266,8 +277,8 @@ HAL_StatusTypeDef ADS1220_FullTest(void)
                 (APP_ADC_VREF == ADS1220_VREF_AVDD) ? "AVDD" : "external REFP1/REFN1");
     UART_Printf("\r\n");
 
-    /* 5. 回读校验：期望值取自驱动内部记录，此处不再硬编码寄存器常量 */
-    UART_Printf("[5] Verifying registers...\r\n");
+    /* 6. 回读校验：期望值取自驱动内部记录，此处不再硬编码寄存器常量 */
+    UART_Printf("[6] Verifying registers...\r\n");
     if (ADS1220_VerifyConfig(&hads, expected, actual) == HAL_OK)
     {
         UART_Printf("     CONFIG0 = 0x%02X\r\n", actual[0]);
@@ -286,8 +297,8 @@ HAL_StatusTypeDef ADS1220_FullTest(void)
         return HAL_ERROR;
     }
 
-    /* 6. Start continuous conversion, but do not output samples yet. */
-    UART_Printf("[6] Starting continuous conversion...\r\n");
+    /* 7. Start continuous conversion, but do not output samples yet. */
+    UART_Printf("[7] Starting continuous conversion...\r\n");
     if (ADS1220_Start(&hads) != HAL_OK)
     {
         UART_Printf("     [ERROR] Failed to start continuous conversion!\r\n");

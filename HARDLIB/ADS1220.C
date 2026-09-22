@@ -168,58 +168,77 @@ HAL_StatusTypeDef ADS1220_ReadAllRegs(ADS1220_Handle_t *hads)
  * === 配置函数 ===
  *============================================================================*/
 
-/* MUX 位值表 - 按枚举索引 */
-static const uint8_t mux_values[] = {
-    ADS1220_MUX_AIN0_AIN1,   /* CH0 */
-    ADS1220_MUX_AIN0_AIN2,   /* CH1 */
-    ADS1220_MUX_AIN0_AIN3,   /* CH2 */
-    ADS1220_MUX_AIN1_AIN2,   /* CH3 */
-    ADS1220_MUX_AIN1_AIN3,   /* CH4 */
-    ADS1220_MUX_AIN2_AIN3,   /* CH5 */
-    ADS1220_MUX_AIN1_AIN0,   /* CH6 */
-    ADS1220_MUX_AIN3_AIN2,   /* CH7 */
+/* MUX 位值表 —— 指定初始化器，下标与 ADS1220_Channel_t 显式绑定，
+ * 枚举与查表不再依赖书写顺序，改动其一不会被静默错位。 */
+static const uint8_t mux_values[ADS1220_CHANNEL_COUNT] = {
+    [ADS1220_CH0_AIN0_AIN1] = ADS1220_MUX_AIN0_AIN1,
+    [ADS1220_CH1_AIN0_AIN2] = ADS1220_MUX_AIN0_AIN2,
+    [ADS1220_CH2_AIN0_AIN3] = ADS1220_MUX_AIN0_AIN3,
+    [ADS1220_CH3_AIN1_AIN2] = ADS1220_MUX_AIN1_AIN2,
+    [ADS1220_CH4_AIN1_AIN3] = ADS1220_MUX_AIN1_AIN3,
+    [ADS1220_CH5_AIN2_AIN3] = ADS1220_MUX_AIN2_AIN3,
+    [ADS1220_CH6_AIN1_AIN0] = ADS1220_MUX_AIN1_AIN0,
+    [ADS1220_CH7_AIN3_AIN2] = ADS1220_MUX_AIN3_AIN2,
 };
 
 /* GAIN 位值表 */
-static const uint8_t gain_values[] = {
-    ADS1220_GAIN_VAL_1,    /* G1 */
-    ADS1220_GAIN_VAL_2,    /* G2 */
-    ADS1220_GAIN_VAL_4,    /* G4 */
-    ADS1220_GAIN_VAL_8,    /* G8 */
-    ADS1220_GAIN_VAL_16,   /* G16 */
-    ADS1220_GAIN_VAL_32,   /* G32 */
-    ADS1220_GAIN_VAL_64,   /* G64 */
-    ADS1220_GAIN_VAL_128,  /* G128 */
+static const uint8_t gain_values[ADS1220_GAIN_COUNT] = {
+    [ADS1220_G1]   = ADS1220_GAIN_VAL_1,
+    [ADS1220_G2]   = ADS1220_GAIN_VAL_2,
+    [ADS1220_G4]   = ADS1220_GAIN_VAL_4,
+    [ADS1220_G8]   = ADS1220_GAIN_VAL_8,
+    [ADS1220_G16]  = ADS1220_GAIN_VAL_16,
+    [ADS1220_G32]  = ADS1220_GAIN_VAL_32,
+    [ADS1220_G64]  = ADS1220_GAIN_VAL_64,
+    [ADS1220_G128] = ADS1220_GAIN_VAL_128,
 };
 
 /* DR 位值表 */
-static const uint8_t dr_values[] = {
-    ADS1220_DR_VAL_20SPS,    /* DR20 */
-    ADS1220_DR_VAL_45SPS,    /* DR45 */
-    ADS1220_DR_VAL_90SPS,    /* DR90 */
-    ADS1220_DR_VAL_175SPS,   /* DR175 */
-    ADS1220_DR_VAL_330SPS,   /* DR330 */
-    ADS1220_DR_VAL_600SPS,   /* DR600 */
-    ADS1220_DR_VAL_1000SPS,  /* DR1000 */
-    ADS1220_DR_VAL_2000SPS,  /* DR2000 */
+static const uint8_t dr_values[ADS1220_DR_COUNT] = {
+    [ADS1220_DR20]   = ADS1220_DR_VAL_20SPS,
+    [ADS1220_DR45]   = ADS1220_DR_VAL_45SPS,
+    [ADS1220_DR90]   = ADS1220_DR_VAL_90SPS,
+    [ADS1220_DR175]  = ADS1220_DR_VAL_175SPS,
+    [ADS1220_DR330]  = ADS1220_DR_VAL_330SPS,
+    [ADS1220_DR600]  = ADS1220_DR_VAL_600SPS,
+    [ADS1220_DR1000] = ADS1220_DR_VAL_1000SPS,
+    [ADS1220_DR2000] = ADS1220_DR_VAL_2000SPS,
 };
 
-/* 实际增益值表 - 用于计算 */
-static const uint8_t gain_actual[] = {1, 2, 4, 8, 16, 32, 64, 128};
+/* 实际增益值表 - 用于计算与打印 */
+static const uint8_t gain_actual[ADS1220_GAIN_COUNT] = {
+    [ADS1220_G1]   = 1U,
+    [ADS1220_G2]   = 2U,
+    [ADS1220_G4]   = 4U,
+    [ADS1220_G8]   = 8U,
+    [ADS1220_G16]  = 16U,
+    [ADS1220_G32]  = 32U,
+    [ADS1220_G64]  = 64U,
+    [ADS1220_G128] = 128U,
+};
 
 /* 实际采样率表 (SPS) - 与 dr_values[] 一一对应，用于调试打印 */
-static const uint16_t dr_sps[] = {20U, 45U, 90U, 175U, 330U, 600U, 1000U, 2000U};
+static const uint16_t dr_sps[ADS1220_DR_COUNT] = {
+    [ADS1220_DR20]   = 20U,
+    [ADS1220_DR45]   = 45U,
+    [ADS1220_DR90]   = 90U,
+    [ADS1220_DR175]  = 175U,
+    [ADS1220_DR330]  = 330U,
+    [ADS1220_DR600]  = 600U,
+    [ADS1220_DR1000] = 1000U,
+    [ADS1220_DR2000] = 2000U,
+};
 
 /* 通道名称表 - 与 mux_values[] 一一对应，仅用于调试打印 */
-static const char *const mux_names[] = {
-    "AIN0-AIN1",        /* CH0 */
-    "AIN0-AIN2",        /* CH1 */
-    "AIN0-AIN3",        /* CH2 */
-    "AIN1-AIN2",        /* CH3 */
-    "AIN1-AIN3",        /* CH4 */
-    "AIN2-AIN3",        /* CH5 */
-    "AIN1-AIN0 (rev)",  /* CH6 */
-    "AIN3-AIN2 (rev)",  /* CH7 */
+static const char *const mux_names[ADS1220_CHANNEL_COUNT] = {
+    [ADS1220_CH0_AIN0_AIN1] = "AIN0-AIN1",
+    [ADS1220_CH1_AIN0_AIN2] = "AIN0-AIN2",
+    [ADS1220_CH2_AIN0_AIN3] = "AIN0-AIN3",
+    [ADS1220_CH3_AIN1_AIN2] = "AIN1-AIN2",
+    [ADS1220_CH4_AIN1_AIN3] = "AIN1-AIN3",
+    [ADS1220_CH5_AIN2_AIN3] = "AIN2-AIN3",
+    [ADS1220_CH6_AIN1_AIN0] = "AIN1-AIN0 (rev)",
+    [ADS1220_CH7_AIN3_AIN2] = "AIN3-AIN2 (rev)",
 };
 
 /*==============================================================================
@@ -228,7 +247,7 @@ static const char *const mux_names[] = {
 
 uint16_t ADS1220_DataRateSps(ADS1220_DataRate_t rate)
 {
-    if ((uint8_t)rate >= (uint8_t)(sizeof(dr_sps) / sizeof(dr_sps[0])))
+    if ((uint8_t)rate >= (uint8_t)ADS1220_DR_COUNT)
         return 0U;
 
     return dr_sps[rate];
@@ -236,7 +255,7 @@ uint16_t ADS1220_DataRateSps(ADS1220_DataRate_t rate)
 
 const char *ADS1220_ChannelName(ADS1220_Channel_t channel)
 {
-    if ((uint8_t)channel >= (uint8_t)(sizeof(mux_names) / sizeof(mux_names[0])))
+    if ((uint8_t)channel >= (uint8_t)ADS1220_CHANNEL_COUNT)
         return "unknown";
 
     return mux_names[channel];
@@ -284,9 +303,43 @@ HAL_StatusTypeDef ADS1220_VerifyConfig(ADS1220_Handle_t *hads,
     return (match != 0U) ? HAL_OK : HAL_ERROR;
 }
 
+HAL_StatusTypeDef ADS1220_ConnectionTest(ADS1220_Handle_t *hads)
+{
+    uint8_t original;
+    uint8_t probe;
+    uint8_t readback;
+    HAL_StatusTypeDef status;
+
+    if (hads == NULL)
+        return HAL_ERROR;
+
+    original = hads->config[ADS1220_REG_CONFIG3];
+
+    /* 只翻转 DRDYM 位（DRDY 新旧模式）：不改变模拟通路，也不启用 IDAC。 */
+    probe = (uint8_t)(original ^ ADS1220_DRDY_NEW_MODE);
+
+    status = ADS1220_WriteReg(hads, ADS1220_REG_CONFIG3, probe);
+    if (status == HAL_OK)
+        status = ADS1220_ReadReg(hads, ADS1220_REG_CONFIG3, &readback);
+
+    /* 无论成功与否都恢复原值，避免把自检用的扰动值留在芯片里。 */
+    if (ADS1220_WriteReg(hads, ADS1220_REG_CONFIG3, original) != HAL_OK)
+        status = HAL_ERROR;
+
+    if (status != HAL_OK)
+        return HAL_ERROR;
+
+    return (readback == probe) ? HAL_OK : HAL_ERROR;
+}
+
 HAL_StatusTypeDef ADS1220_SetChannel(ADS1220_Handle_t *hads, ADS1220_Channel_t channel)
 {
-    uint8_t cfg0 = hads->config[ADS1220_REG_CONFIG0];
+    uint8_t cfg0;
+
+    if (hads == NULL || (uint8_t)channel >= (uint8_t)ADS1220_CHANNEL_COUNT)
+        return HAL_ERROR;
+
+    cfg0 = hads->config[ADS1220_REG_CONFIG0];
     cfg0 &= ~ADS1220_MUX_MASK;
     cfg0 |= mux_values[channel];
 
@@ -299,7 +352,12 @@ HAL_StatusTypeDef ADS1220_SetChannel(ADS1220_Handle_t *hads, ADS1220_Channel_t c
 
 HAL_StatusTypeDef ADS1220_SetGain(ADS1220_Handle_t *hads, ADS1220_Gain_t gain)
 {
-    uint8_t cfg0 = hads->config[ADS1220_REG_CONFIG0];
+    uint8_t cfg0;
+
+    if (hads == NULL || (uint8_t)gain >= (uint8_t)ADS1220_GAIN_COUNT)
+        return HAL_ERROR;
+
+    cfg0 = hads->config[ADS1220_REG_CONFIG0];
     cfg0 &= ~ADS1220_GAIN_MASK;
     cfg0 |= gain_values[gain];
 
@@ -312,7 +370,12 @@ HAL_StatusTypeDef ADS1220_SetGain(ADS1220_Handle_t *hads, ADS1220_Gain_t gain)
 
 HAL_StatusTypeDef ADS1220_SetDataRate(ADS1220_Handle_t *hads, ADS1220_DataRate_t rate)
 {
-    uint8_t cfg1 = hads->config[ADS1220_REG_CONFIG1];
+    uint8_t cfg1;
+
+    if (hads == NULL || (uint8_t)rate >= (uint8_t)ADS1220_DR_COUNT)
+        return HAL_ERROR;
+
+    cfg1 = hads->config[ADS1220_REG_CONFIG1];
     cfg1 &= ~ADS1220_DR_MASK;
     cfg1 |= dr_values[rate];
 
@@ -325,9 +388,14 @@ HAL_StatusTypeDef ADS1220_SetDataRate(ADS1220_Handle_t *hads, ADS1220_DataRate_t
 
 HAL_StatusTypeDef ADS1220_SetMode(ADS1220_Handle_t *hads, ADS1220_Mode_t mode)
 {
-    uint8_t cfg1 = hads->config[ADS1220_REG_CONFIG1];
+    uint8_t cfg1;
+
+    if (hads == NULL || (uint8_t)mode >= (uint8_t)ADS1220_MODE_COUNT)
+        return HAL_ERROR;
+
+    cfg1 = hads->config[ADS1220_REG_CONFIG1];
     cfg1 &= ~ADS1220_MODE_MASK;
-    
+
     if (mode == ADS1220_MOD_TURBO)
         cfg1 |= ADS1220_MODE_VAL_TURBO;
     else if (mode == ADS1220_MOD_DUTY)
@@ -342,7 +410,12 @@ HAL_StatusTypeDef ADS1220_SetMode(ADS1220_Handle_t *hads, ADS1220_Mode_t mode)
 
 HAL_StatusTypeDef ADS1220_SetConvMode(ADS1220_Handle_t *hads, ADS1220_ConvMode_t mode)
 {
-    uint8_t cfg1 = hads->config[ADS1220_REG_CONFIG1];
+    uint8_t cfg1;
+
+    if (hads == NULL || (uint8_t)mode >= (uint8_t)ADS1220_CONV_COUNT)
+        return HAL_ERROR;
+
+    cfg1 = hads->config[ADS1220_REG_CONFIG1];
     cfg1 &= ~ADS1220_CM_MASK;
     if (mode == ADS1220_CONV_CONT)
         cfg1 |= ADS1220_CM_VAL_CONTINUOUS;
@@ -356,7 +429,12 @@ HAL_StatusTypeDef ADS1220_SetConvMode(ADS1220_Handle_t *hads, ADS1220_ConvMode_t
 
 HAL_StatusTypeDef ADS1220_SetVRef(ADS1220_Handle_t *hads, ADS1220_VRef_t vref)
 {
-    uint8_t cfg2 = hads->config[ADS1220_REG_CONFIG2];
+    uint8_t cfg2;
+
+    if (hads == NULL || (uint8_t)vref >= (uint8_t)ADS1220_VREF_COUNT)
+        return HAL_ERROR;
+
+    cfg2 = hads->config[ADS1220_REG_CONFIG2];
     cfg2 &= ~ADS1220_VREF_MASK;
     cfg2 |= ((uint8_t)vref << 6);
 
@@ -369,31 +447,61 @@ HAL_StatusTypeDef ADS1220_SetVRef(ADS1220_Handle_t *hads, ADS1220_VRef_t vref)
 
 HAL_StatusTypeDef ADS1220_SetIDACCurrent(ADS1220_Handle_t *hads, ADS1220_IDAC_Current_t current)
 {
-    uint8_t cfg2 = hads->config[ADS1220_REG_CONFIG2];
+    uint8_t cfg2;
+
+    if (hads == NULL || (uint8_t)current >= (uint8_t)ADS1220_IDAC_COUNT)
+        return HAL_ERROR;
+
+    cfg2 = hads->config[ADS1220_REG_CONFIG2];
     cfg2 &= ~ADS1220_IDAC_MASK;
     cfg2 |= (uint8_t)current;
     return ADS1220_WriteReg(hads, ADS1220_REG_CONFIG2, cfg2);
 }
 
-HAL_StatusTypeDef ADS1220_SetIDAC1Channel(ADS1220_Handle_t *hads, uint8_t ch)
+/**
+ * @brief 设置 IDAC1 的输出通道。
+ *
+ * @param idac1_bits 取值必须是 ADS1220_IDAC1_xxx 常量之一（已按位对位的
+ *                   寄存器值，例如 ADS1220_IDAC1_AIN0 = 0x20）。
+ *                   相比"传 0~7 索引再由驱动移位"，直接传寄存器值可以让
+ *                   头文件里已有的 ADS1220_IDAC1_xxx 常量直接可用，
+ *                   避免出现"常量是移位值、函数却要索引"的混用陷阱。
+ */
+HAL_StatusTypeDef ADS1220_SetIDAC1Channel(ADS1220_Handle_t *hads, uint8_t idac1_bits)
 {
-    uint8_t cfg3 = hads->config[ADS1220_REG_CONFIG3];
+    uint8_t cfg3;
+
+    if (hads == NULL || (idac1_bits & ~ADS1220_IDAC1_MASK) != 0U)
+        return HAL_ERROR;
+
+    cfg3 = hads->config[ADS1220_REG_CONFIG3];
     cfg3 &= ~ADS1220_IDAC1_MASK;
-    cfg3 |= ((ch & 0x07U) << 5);
+    cfg3 |= idac1_bits;
     return ADS1220_WriteReg(hads, ADS1220_REG_CONFIG3, cfg3);
 }
 
-HAL_StatusTypeDef ADS1220_SetIDAC2Channel(ADS1220_Handle_t *hads, uint8_t ch)
+/** @brief 设置 IDAC2 的输出通道，参数含义同 ADS1220_SetIDAC1Channel()。 */
+HAL_StatusTypeDef ADS1220_SetIDAC2Channel(ADS1220_Handle_t *hads, uint8_t idac2_bits)
 {
-    uint8_t cfg3 = hads->config[ADS1220_REG_CONFIG3];
+    uint8_t cfg3;
+
+    if (hads == NULL || (idac2_bits & ~ADS1220_IDAC2_MASK) != 0U)
+        return HAL_ERROR;
+
+    cfg3 = hads->config[ADS1220_REG_CONFIG3];
     cfg3 &= ~ADS1220_IDAC2_MASK;
-    cfg3 |= ((ch & 0x07U) << 2);
+    cfg3 |= idac2_bits;
     return ADS1220_WriteReg(hads, ADS1220_REG_CONFIG3, cfg3);
 }
 
 HAL_StatusTypeDef ADS1220_EnableTempSensor(ADS1220_Handle_t *hads, uint8_t enable)
 {
-    uint8_t cfg1 = hads->config[ADS1220_REG_CONFIG1];
+    uint8_t cfg1;
+
+    if (hads == NULL)
+        return HAL_ERROR;
+
+    cfg1 = hads->config[ADS1220_REG_CONFIG1];
     if (enable)
         cfg1 |= ADS1220_TS_ENABLED;
     else

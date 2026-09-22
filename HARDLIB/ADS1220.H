@@ -40,15 +40,15 @@ extern "C" {
 /*==============================================================================
  * CONFIG0 — MUX / GAIN / PGA_BYPASS
  *============================================================================*/
-/* MUX 位值 */
+/* MUX 位值 (CONFIG0[7:4]) —— 按数值递增排列，与 ADS1220_Channel_t 枚举一一对应 */
 #define ADS1220_MUX_AIN0_AIN1       0x00U
 #define ADS1220_MUX_AIN0_AIN2       0x10U
 #define ADS1220_MUX_AIN0_AIN3       0x20U
-#define ADS1220_MUX_AIN1_AIN0       0x01U
 #define ADS1220_MUX_AIN1_AIN2       0x30U
 #define ADS1220_MUX_AIN1_AIN3       0x40U
 #define ADS1220_MUX_AIN2_AIN3       0x50U
-#define ADS1220_MUX_AIN3_AIN2       0x60U
+#define ADS1220_MUX_AIN1_AIN0       0x60U   /* AIN1 为正、AIN0 为负（反相） */
+#define ADS1220_MUX_AIN3_AIN2       0x70U   /* AIN3 为正、AIN2 为负（反相） */
 #define ADS1220_MUX_MASK            0xF0U
 
 /* GAIN 位值 */
@@ -182,6 +182,7 @@ typedef enum {
     ADS1220_CH5_AIN2_AIN3 = 5,    /* 差分: AIN2-AIN3 */
     ADS1220_CH6_AIN1_AIN0 = 6,    /* 差分: AIN1-AIN0 (反接) */
     ADS1220_CH7_AIN3_AIN2 = 7,    /* 差分: AIN3-AIN2 (反接) */
+    ADS1220_CHANNEL_COUNT,        /* 通道总数，非合法通道；用于查表长度与边界检查 */
 } ADS1220_Channel_t;
 
 /* 增益枚举 */
@@ -194,6 +195,7 @@ typedef enum {
     ADS1220_G32 = 5,
     ADS1220_G64 = 6,
     ADS1220_G128 = 7,
+    ADS1220_GAIN_COUNT,           /* 增益档位总数，非合法档位 */
 } ADS1220_Gain_t;
 
 /* 数据速率枚举 */
@@ -206,6 +208,7 @@ typedef enum {
     ADS1220_DR600 = 5,
     ADS1220_DR1000 = 6,
     ADS1220_DR2000 = 7,
+    ADS1220_DR_COUNT,             /* 速率档位总数，非合法档位 */
 } ADS1220_DataRate_t;
 
 /* 模式枚举 */
@@ -213,12 +216,14 @@ typedef enum {
     ADS1220_MOD_NORM = 0,
     ADS1220_MOD_TURBO = 1,
     ADS1220_MOD_DUTY = 2,
+    ADS1220_MODE_COUNT,           /* 模式总数，非合法模式 */
 } ADS1220_Mode_t;
 
 /* 转换模式枚举 */
 typedef enum {
     ADS1220_CONV_SINGLE = 0,
     ADS1220_CONV_CONT = 1,
+    ADS1220_CONV_COUNT,           /* 转换模式总数，非合法模式 */
 } ADS1220_ConvMode_t;
 
 /* VREF 枚举 */
@@ -227,6 +232,7 @@ typedef enum {
     ADS1220_VREF_EXT = 1,
     ADS1220_VREF_AVDD = 2,
     ADS1220_VREF_EXT2 = 3,
+    ADS1220_VREF_COUNT,           /* 基准源总数，非合法基准 */
 } ADS1220_VRef_t;
 
 /* IDAC 电流枚举 */
@@ -239,6 +245,7 @@ typedef enum {
     ADS1220_IDAC500UA = 5,
     ADS1220_IDAC1000UA = 6,
     ADS1220_IDAC1500UA = 7,
+    ADS1220_IDAC_COUNT,           /* IDAC 档位总数，非合法档位 */
 } ADS1220_IDAC_Current_t;
 
 /* 器件句柄 */
@@ -292,6 +299,20 @@ HAL_StatusTypeDef ADS1220_ReadAllRegs(ADS1220_Handle_t *hads);
 HAL_StatusTypeDef ADS1220_VerifyConfig(ADS1220_Handle_t *hads,
                                        uint8_t expected[4],
                                        uint8_t actual[4]);
+
+/**
+ * @brief 连通性自检：确认 SPI 写通路真正生效。
+ *
+ * 原理：把 CONFIG3 的 DRDYM 位翻转成一个与当前值不同的合法值，回读确认
+ * 写入生效，随后恢复原值。这样即使目标配置恰好等于芯片当前值，也能发现
+ * 写通路故障（仅靠"目标值 == 读回值"的比对无法覆盖这种情形）。
+ *
+ * 扰动只涉及 DRDYM（DRDY 新旧模式），不改变模拟通路，也不启用 IDAC 电流，
+ * 应在启动转换之前调用。
+ *
+ * @return HAL_OK 表示写入生效且原值已恢复，否则 HAL_ERROR
+ */
+HAL_StatusTypeDef ADS1220_ConnectionTest(ADS1220_Handle_t *hads);
 
 /* 句柄当前增益的实际数值 (1/2/4/.../128)，用于调试打印 */
 uint8_t ADS1220_GetGainValue(ADS1220_Handle_t *hads);
