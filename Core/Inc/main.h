@@ -63,11 +63,8 @@ void Error_Handler(void);
 #define ADS1220_CS_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
-
-/* 外部基准 REFP0-REFN0 实际电压 (mV)，请按硬件测量�?�修�?
- * �?: REF5025 -> 2500.0f,  2.048V 基准芯片 -> 2048.0f */
-#define ADS1220_EXT_VREF_MV   4841.0f
-
+/* ADC 相关配置（基准电压、增益、速率、通道等）统一放在 App/app_config.h，
+ * 这里不再重复定义，避免出现第二处"基准电压"导致两处不一致。 */
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

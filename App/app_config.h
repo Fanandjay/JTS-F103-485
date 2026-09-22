@@ -38,14 +38,36 @@ extern "C" {
 #define APP_ADC_DRDY_PORT   GPIOB
 #define APP_ADC_DRDY_PIN    GPIO_PIN_14
 
-/* VOFA+ 输出通道定义：
+/*==============================================================================
+ * 基准与物理量换算
+ *
+ * 本板采用比例式（ratiometric）接法：电桥激励端接 REFP0/REFN0，
+ * 于是 ADC 的基准电压就是电桥激励电压，激励源的漂移会被自动抵消。
+ *
+ * APP_VREF_MV 是 REFP0-REFN0 之间的实际电压，单位 mV。比例式接法下它
+ * 应当等于 APP_VEXC_MV。请用万用表实测后填写，不要直接照抄标称值 ——
+ * 这个数直接决定换算出的 mV 准不准。
+ *
+ * 换算公式（见 ADS1220_RawToVoltage）：
+ *   Vdiff(mV) = raw * APP_VREF_MV / (gain * 2^23)
+ * 满量程 = ±APP_VREF_MV / gain，当前 = ±5000/64 ≈ ±78.1 mV。
+ *============================================================================*/
+#define APP_VEXC_MV       5000.0f   /* 电桥激励电压标称值 (mV) */
+#define APP_VREF_MV       5000.0f   /* REFP0-REFN0 实测基准电压 (mV) */
+
+/*==============================================================================
+ * VOFA+ 输出通道定义（JustFloat 一帧内的通道顺序）
  *   CH1 = 原始 ADC 码（未去皮）
  *   CH2 = 去皮后的 ADC 码
- *   CH3 = 去皮并滤波后的 ADC 码 */
+ *   CH3 = 去皮并滤波后的 ADC 码
+ *   CH4 = CH3 换算出的差分电压 (mV)
+ * 注意：改动通道数后，VOFA+ 上位机里也要相应增删通道。
+ *============================================================================*/
 #define APP_VOFA_CH_RAW         0U
 #define APP_VOFA_CH_TARED       1U
 #define APP_VOFA_CH_FILTERED    2U
-#define APP_VOFA_CHANNELS       3U
+#define APP_VOFA_CH_MV          3U
+#define APP_VOFA_CHANNELS       4U
 
 /*==============================================================================
  * 数字滤波配置

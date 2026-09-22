@@ -204,5 +204,13 @@ static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw)
     vofa_values[APP_VOFA_CH_TARED]    = (float)corrected_raw;
     vofa_values[APP_VOFA_CH_FILTERED] = (float)filtered_raw;
 
+    /* 比例式接法下基准即电桥激励，可直接换算为差分电压(mV)：
+     *   Vdiff = raw * Vref / (gain * 2^23)
+     * 用与 CH3 相同的滤波后码值换算，方便与 CH3 直接对照。 */
+    vofa_values[APP_VOFA_CH_MV] =
+        ADS1220_RawToVoltage(filtered_raw,
+                             APP_VREF_MV,
+                             ADS1220_GetGainValue(measure->hads));
+
     (void)VOFA_JustFloat_Send(measure->huart, vofa_values, APP_VOFA_CHANNELS);
 }
