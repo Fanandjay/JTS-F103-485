@@ -1,0 +1,43 @@
+# ============================================================
+#  20260703-ADS1220  STM32F103 + ADS1220
+#  只跟踪源码、工程配置与文档；忽略一切可再生成的产物。
+# ============================================================
+
+# ---------- 构建产物 ----------
+MDK-ARM/build/
+MDK-ARM/20260703-ADS1220/
+MDK-ARM/RTE/
+*.o
+*.obj
+*.crf
+*.d
+*.axf
+*.elf
+*.hex
+*.bin
+*.s19
+*.map
+*.lst
+*.htm
+*.lnp
+*.sct
+*.dep
+*.iex
+*.build_log.htm
+*.scvd
+*.uvguix.*
+
+# ---------- EIDE / 编辑器派生内容 ----------
+MDK-ARM/.cmsis/
+MDK-ARM/.eide/log/
+MDK-ARM/.eide.usr.ctx.json
+MDK-ARM/.vscode/uv4.log.lock
+MDK-ARM/.vscode/keil-assistant.log
+
+# ---------- Keil 器件支持包（厂商内容，可由 packDir 重新获取） ----------
+MDK-ARM/.pack/
+
+# ---------- 操作系统 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
