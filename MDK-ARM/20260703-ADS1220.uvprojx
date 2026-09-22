@@ -551,6 +551,56 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>App</GroupName>
+          <Files>
+            <File>
+              <FileName>app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\app.c</FilePath>
+            </File>
+            <File>
+              <FileName>app.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\App\app.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_config.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\App\app_config.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_measure.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\app_measure.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_measure.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\App\app_measure.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_report.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\app_report.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_report.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\App\app_report.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_shell.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\app_shell.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_shell.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\App\app_shell.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>

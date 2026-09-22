@@ -59,6 +59,18 @@ virtualFolder:
         - path: ../HARDLIB/Filter.c
         - path: ../HARDLIB/VOFA.c
       folders: []
+    - name: App
+      files:
+        - path: ../App/app.c
+        - path: ../App/app.h
+        - path: ../App/app_config.h
+        - path: ../App/app_measure.c
+        - path: ../App/app_measure.h
+        - path: ../App/app_report.c
+        - path: ../App/app_report.h
+        - path: ../App/app_shell.c
+        - path: ../App/app_shell.h
+      folders: []
     - name: ::CMSIS
       files: []
       folders: []

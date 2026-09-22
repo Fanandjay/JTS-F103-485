@@ -32,6 +32,21 @@ extern "C" {
 #define APP_ADC_CONV      ADS1220_CONV_CONT       /* 连续转换 */
 #define APP_ADC_VREF      ADS1220_VREF_EXT        /* 外部基准 REFP0/REFN0 */
 
+/* 片选与 DRDY 引脚。CS 由软件控制；DOUT/DRDY 与 SPI2 MISO 复用同一引脚 PB14 */
+#define APP_ADC_CS_PORT     ADS1220_CS_GPIO_Port
+#define APP_ADC_CS_PIN      ADS1220_CS_Pin
+#define APP_ADC_DRDY_PORT   GPIOB
+#define APP_ADC_DRDY_PIN    GPIO_PIN_14
+
+/* VOFA+ 输出通道定义：
+ *   CH1 = 原始 ADC 码（未去皮）
+ *   CH2 = 去皮后的 ADC 码
+ *   CH3 = 去皮并滤波后的 ADC 码 */
+#define APP_VOFA_CH_RAW         0U
+#define APP_VOFA_CH_TARED       1U
+#define APP_VOFA_CH_FILTERED    2U
+#define APP_VOFA_CHANNELS       3U
+
 /*==============================================================================
  * 数字滤波配置
  *============================================================================*/
