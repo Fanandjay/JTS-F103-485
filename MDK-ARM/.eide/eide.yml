@@ -80,6 +80,7 @@ targets:
         - ../Drivers/CMSIS/Device/ST/STM32F1xx/Include
         - ../Drivers/CMSIS/Include
         - ../HARDLIB
+        - ../App
         - .cmsis/include
         - RTE/_20260703-ADS1220
       libList: []

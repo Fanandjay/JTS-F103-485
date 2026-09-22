@@ -13,6 +13,7 @@
 #include "gpio.h"
 
 /* USER CODE BEGIN Includes */
+#include "app_config.h"
 #include "ADS1220.H"
 #include "Filter.h"
 #include "VOFA.h"
@@ -22,11 +23,8 @@
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/
-#define BRIDGE_EXCITATION_V    5.0f   /* ????????? */
-#define UART_COMMAND_BUFFER_SIZE 32U
-#define DRDY_CONFIRM_COUNT       2U
-#define DRDY_REARM_TIMEOUT_MS    60U
-#define ZERO_CALIBRATION_SAMPLES 100U
+/* 可调参数一律集中在 App/app_config.h，本文件只保留内部使用的宏。 */
+#define BRIDGE_EXCITATION_V    5.0f   /* 电桥激励电压(V)，比例式接法下等于基准 */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
@@ -36,7 +34,7 @@
 ADS1220_Handle_t hads;
 
 static uint8_t uart_rx_byte;
-static uint8_t uart_command_buffer[UART_COMMAND_BUFFER_SIZE];
+static uint8_t uart_command_buffer[APP_CMD_BUFFER_SIZE];
 static volatile uint8_t uart_command_length;
 static volatile uint8_t uart_pending_command_length;
 static volatile uint8_t uart_command_ready;
@@ -68,7 +66,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 /* USER CODE BEGIN PFP */
 void UART_Printf(const char *fmt, ...)
 {
-    char buf[256];
+    char buf[128];
     va_list args;
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);
@@ -105,7 +103,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
                 uart_pending_command_length = 1U;
                 uart_command_ready = 1U;
             }
-            else if (uart_command_length < (UART_COMMAND_BUFFER_SIZE - 1U))
+            else if (uart_command_length < (APP_CMD_BUFFER_SIZE - 1U))
             {
                 uart_command_buffer[uart_command_length++] = uart_rx_byte;
             }
@@ -132,7 +130,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 
 static void UART_ProcessCommand(void)
 {
-    uint8_t command[UART_COMMAND_BUFFER_SIZE];
+    uint8_t command[APP_CMD_BUFFER_SIZE];
     uint8_t command_length;
 
     if (!uart_command_ready)
@@ -189,16 +187,21 @@ static void UART_CommandReceivedCallback(uint8_t command)
 /* USER CODE END PFP */
 
 /**
-  * @brief  ADS1220 ??????
+  * @brief  ADS1220 上电自检：初始化、复位、配置、回读校验、启动连续转换。
+  * @note   配置参数全部取自 App/app_config.h —— 打印、写入、校验三者同源，
+  *         不会再出现"打印 64x 却写 128x"这类不一致。
   */
 HAL_StatusTypeDef ADS1220_FullTest(void)
 {
+    uint8_t expected[4];
+    uint8_t actual[4];
+
     UART_Printf("\r\n");
     UART_Printf("========================================\r\n");
     UART_Printf("  ADS1220 Initialization\r\n");
     UART_Printf("========================================\r\n\r\n");
-    
-    /* 1. ??? */
+
+    /* 1. 初始化 */
     UART_Printf("[1] Initializing ADS1220...\r\n");
     if (ADS1220_Init(&hads, &hspi2, ADS1220_CS_GPIO_Port, ADS1220_CS_Pin,
                      GPIOB, GPIO_PIN_14) != HAL_OK)
@@ -207,8 +210,8 @@ HAL_StatusTypeDef ADS1220_FullTest(void)
         return HAL_ERROR;
     }
     UART_Printf("     [OK] ADS1220_Init success\r\n\r\n");
-    
-    /* 2. ?? RESET */
+
+    /* 2. 发送 RESET */
     UART_Printf("[2] Sending RESET command...\r\n");
     if (ADS1220_Reset(&hads) != HAL_OK)
     {
@@ -216,51 +219,75 @@ HAL_StatusTypeDef ADS1220_FullTest(void)
         return HAL_ERROR;
     }
     UART_Printf("     [OK] RESET success\r\n\r\n");
-    
-    /* 3. ?????? */
-    UART_Printf("[3] Reading default registers...\r\n");
-    uint8_t cfg0, cfg1, cfg2, cfg3;
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG0, &cfg0);
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG1, &cfg1);
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG2, &cfg2);
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG3, &cfg3);
-    UART_Printf("     CONFIG0 = 0x%02X\r\n", cfg0);
-    UART_Printf("     CONFIG1 = 0x%02X\r\n", cfg1);
-    UART_Printf("     CONFIG2 = 0x%02X\r\n", cfg2);
-    UART_Printf("     CONFIG3 = 0x%02X\r\n\r\n", cfg3);
-    
-    /* 4. ???? */
-    UART_Printf("[4] Configuring ADS1220...\r\n");
-    UART_Printf("     Channel: AIN2-AIN3 (Differential)\r\n");
-    UART_Printf("     Gain: 64x\r\n");
-    UART_Printf("     Data Rate: 20 SPS\r\n");
-    UART_Printf("     Mode: Normal\r\n");
-    UART_Printf("     Conversion: Continuous\r\n");
-    UART_Printf("     VREF: External (REFP/REFN)\r\n");
-    
-    ADS1220_SetChannel(&hads, ADS1220_CH5_AIN2_AIN3);
-    ADS1220_SetGain(&hads, ADS1220_G128);
-    ADS1220_SetDataRate(&hads, ADS1220_DR90);
-    ADS1220_SetMode(&hads, ADS1220_MOD_NORM);
-    ADS1220_SetConvMode(&hads, ADS1220_CONV_CONT);
-    ADS1220_SetVRef(&hads, ADS1220_VREF_EXT);
-    
-    /* ?????? */
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG0, &cfg0);
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG1, &cfg1);
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG2, &cfg2);
-    ADS1220_ReadReg(&hads, ADS1220_REG_CONFIG3, &cfg3);
-    
-    UART_Printf("\r\n     CONFIG0 = 0x%02X (MUX=AIN2-AIN3, GAIN=64) %s\r\n", 
-                cfg0, cfg0 == 0x5C ? "[OK]" : "[ERROR]");
-    UART_Printf("     CONFIG1 = 0x%02X (DR=20SPS, CONT) %s\r\n", 
-                cfg1, (cfg1 & 0x07) == 0x04 ? "[OK]" : "[ERROR]");
-    UART_Printf("     CONFIG2 = 0x%02X (VREF=External REFP/REFN) %s\r\n", 
-                cfg2, cfg2 == 0x40 ? "[OK]" : "[ERROR]");
-    UART_Printf("     CONFIG3 = 0x%02X\r\n\r\n", cfg3);
-    
-    /* 5. Start continuous conversion, but do not output samples yet. */
-    UART_Printf("[5] Starting continuous conversion...\r\n");
+
+    /* 3. 读复位默认值：ADS1220 复位后 CONFIG0..3 全为 0x00。
+     *    若读到 FF FF FF FF，说明 DOUT/MISO 恒高，芯片没有响应
+     *    （未焊接 / 未供电 / 片选或时钟异常）。 */
+    UART_Printf("[3] Reset defaults...\r\n");
+    if (ADS1220_ReadAllRegs(&hads) != HAL_OK)
+    {
+        UART_Printf("     [ERROR] Failed to read registers!\r\n");
+        return HAL_ERROR;
+    }
+    UART_Printf("     CONFIG0..3 = %02X %02X %02X %02X\r\n",
+                hads.config[0], hads.config[1], hads.config[2], hads.config[3]);
+    if (hads.config[0] == 0xFFU && hads.config[1] == 0xFFU &&
+        hads.config[2] == 0xFFU && hads.config[3] == 0xFFU)
+    {
+        UART_Printf("     [ERROR] All registers read 0xFF - ADS1220 not responding\r\n");
+        return HAL_ERROR;
+    }
+    UART_Printf("     [OK]\r\n\r\n");
+
+    /* 4. 按 App/app_config.h 配置（写入与打印同源） */
+    UART_Printf("[4] Configuring from App/app_config.h...\r\n");
+    if (ADS1220_Config(&hads,
+                       APP_ADC_CHANNEL,
+                       APP_ADC_GAIN,
+                       APP_ADC_DR,
+                       APP_ADC_MODE,
+                       APP_ADC_CONV,
+                       APP_ADC_VREF) != HAL_OK)
+    {
+        UART_Printf("     [ERROR] ADS1220_Config failed!\r\n");
+        return HAL_ERROR;
+    }
+    UART_Printf("     Channel    : %s\r\n", ADS1220_ChannelName(APP_ADC_CHANNEL));
+    UART_Printf("     Gain       : %u\r\n", (unsigned)ADS1220_GetGainValue(&hads));
+    UART_Printf("     Data rate  : %u SPS\r\n", (unsigned)ADS1220_DataRateSps(APP_ADC_DR));
+    UART_Printf("     Mode       : %s\r\n",
+                (APP_ADC_MODE == ADS1220_MOD_NORM)  ? "normal" :
+                (APP_ADC_MODE == ADS1220_MOD_TURBO) ? "turbo" : "duty-cycle");
+    UART_Printf("     Conversion : %s\r\n",
+                (APP_ADC_CONV == ADS1220_CONV_CONT) ? "continuous" : "single-shot");
+    UART_Printf("     VREF       : %s\r\n",
+                (APP_ADC_VREF == ADS1220_VREF_INT)  ? "internal 2.048V" :
+                (APP_ADC_VREF == ADS1220_VREF_EXT)  ? "external REFP0/REFN0" :
+                (APP_ADC_VREF == ADS1220_VREF_AVDD) ? "AVDD" : "external REFP1/REFN1");
+    UART_Printf("\r\n");
+
+    /* 5. 回读校验：期望值取自驱动内部记录，此处不再硬编码寄存器常量 */
+    UART_Printf("[5] Verifying registers...\r\n");
+    if (ADS1220_VerifyConfig(&hads, expected, actual) == HAL_OK)
+    {
+        UART_Printf("     CONFIG0 = 0x%02X\r\n", actual[0]);
+        UART_Printf("     CONFIG1 = 0x%02X\r\n", actual[1]);
+        UART_Printf("     CONFIG2 = 0x%02X\r\n", actual[2]);
+        UART_Printf("     CONFIG3 = 0x%02X\r\n", actual[3]);
+        UART_Printf("     [OK] Registers verified\r\n\r\n");
+    }
+    else
+    {
+        UART_Printf("     CONFIG0: expect 0x%02X, actual 0x%02X\r\n", expected[0], actual[0]);
+        UART_Printf("     CONFIG1: expect 0x%02X, actual 0x%02X\r\n", expected[1], actual[1]);
+        UART_Printf("     CONFIG2: expect 0x%02X, actual 0x%02X\r\n", expected[2], actual[2]);
+        UART_Printf("     CONFIG3: expect 0x%02X, actual 0x%02X\r\n", expected[3], actual[3]);
+        UART_Printf("     [ERROR] Register verification failed\r\n");
+        return HAL_ERROR;
+    }
+
+    /* 6. Start continuous conversion, but do not output samples yet. */
+    UART_Printf("[6] Starting continuous conversion...\r\n");
     if (ADS1220_Start(&hads) != HAL_OK)
     {
         UART_Printf("     [ERROR] Failed to start continuous conversion!\r\n");
@@ -268,7 +295,7 @@ HAL_StatusTypeDef ADS1220_FullTest(void)
     }
     UART_Printf("     [OK] Continuous conversion started\r\n");
     UART_Printf("\r\nReady. Send 0 to start output, 1 to stop output.\r\n");
-    
+
     return HAL_OK;
 }
 
@@ -294,19 +321,18 @@ int main(void)
     UART_Printf("  STM32F103C8\r\n");
     UART_Printf("========================================\r\n");
     UART_Printf("  SPI2: PB13=SCK, PB14=MISO, PB15=MOSI\r\n");
-    UART_Printf("  CS: PB12\r\n");
-    UART_Printf("  Bridge: 4x 120 Ohm, AIN2-AIN3 diff\r\n");
-    UART_Printf("  VEXC: 5.0V via REFP/REFN (ratiometric)\r\n");
-    UART_Printf("  Gain: 64, DR: 20 SPS\r\n");
+    UART_Printf("  CS  : PB12\r\n");
     UART_Printf("  Command: 0=start, 1=stop, 2=tare\r\n");
     UART_Printf("========================================\r\n\r\n");
 
+    /* ADC 配置在自检段中配置完成后再打印，保证描述与实际寄存器一致。 */
     if (ADS1220_FullTest() != HAL_OK)
     {
+        UART_Printf("\r\nSelf-test FAILED - execution halted.\r\n");
         Error_Handler();
     }
-    
-    /* ??? */
+
+    /* 主循环：轮询 DRDY，取数、去皮、滤波并输出 */
     while (1)
     {
         UART_ProcessCommand();
@@ -327,7 +353,7 @@ int main(void)
         {
             /* Normal path: unlock when DOUT/DRDY returns high. */
             if (!adc_data_ready ||
-                (HAL_GetTick() - drdy_lock_tick) >= DRDY_REARM_TIMEOUT_MS)
+                (HAL_GetTick() - drdy_lock_tick) >= APP_DRDY_TIMEOUT_MS)
             {
                 drdy_read_locked = 0U;
                 drdy_low_count = 0U;
@@ -336,10 +362,10 @@ int main(void)
         else if (adc_data_ready)
         {
             /* Require two consecutive low-level observations before reading. */
-            if (drdy_low_count < DRDY_CONFIRM_COUNT)
+            if (drdy_low_count < APP_DRDY_CONFIRM)
                 drdy_low_count++;
 
-            if (drdy_low_count >= DRDY_CONFIRM_COUNT)
+            if (drdy_low_count >= APP_DRDY_CONFIRM)
             {
                 drdy_read_locked = 1U;
                 drdy_lock_tick = HAL_GetTick();
@@ -363,7 +389,7 @@ int main(void)
                         zero_sum += (int64_t)raw;
                         zero_sample_count++;
 
-                        if (zero_sample_count >= ZERO_CALIBRATION_SAMPLES)
+                        if (zero_sample_count >= APP_TARE_SAMPLES)
                         {
                             zero_offset = (int32_t)(zero_sum /
                                                      (int64_t)zero_sample_count);
@@ -399,7 +425,7 @@ int main(void)
                             /* Initialize both filters at the first valid code
                              * to avoid a startup transient from zero. */
                             MovingAverage5_Init(&adc_moving_average);
-                            FirstOrderLowPass_Init(&adc_lowpass, 0.25f);
+                            FirstOrderLowPass_Init(&adc_lowpass, APP_LPF_ALPHA);
                             adc_filter_started = 1U;
                         }
 

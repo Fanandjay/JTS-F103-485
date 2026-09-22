@@ -207,6 +207,83 @@ static const uint8_t dr_values[] = {
 /* 实际增益值表 - 用于计算 */
 static const uint8_t gain_actual[] = {1, 2, 4, 8, 16, 32, 64, 128};
 
+/* 实际采样率表 (SPS) - 与 dr_values[] 一一对应，用于调试打印 */
+static const uint16_t dr_sps[] = {20U, 45U, 90U, 175U, 330U, 600U, 1000U, 2000U};
+
+/* 通道名称表 - 与 mux_values[] 一一对应，仅用于调试打印 */
+static const char *const mux_names[] = {
+    "AIN0-AIN1",        /* CH0 */
+    "AIN0-AIN2",        /* CH1 */
+    "AIN0-AIN3",        /* CH2 */
+    "AIN1-AIN2",        /* CH3 */
+    "AIN1-AIN3",        /* CH4 */
+    "AIN2-AIN3",        /* CH5 */
+    "AIN1-AIN0 (rev)",  /* CH6 */
+    "AIN3-AIN2 (rev)",  /* CH7 */
+};
+
+/*==============================================================================
+ * === 期望值与回读校验 ===
+ *============================================================================*/
+
+uint16_t ADS1220_DataRateSps(ADS1220_DataRate_t rate)
+{
+    if ((uint8_t)rate >= (uint8_t)(sizeof(dr_sps) / sizeof(dr_sps[0])))
+        return 0U;
+
+    return dr_sps[rate];
+}
+
+const char *ADS1220_ChannelName(ADS1220_Channel_t channel)
+{
+    if ((uint8_t)channel >= (uint8_t)(sizeof(mux_names) / sizeof(mux_names[0])))
+        return "unknown";
+
+    return mux_names[channel];
+}
+
+HAL_StatusTypeDef ADS1220_VerifyConfig(ADS1220_Handle_t *hads,
+                                       uint8_t expected[4],
+                                       uint8_t actual[4])
+{
+    uint8_t want[4];
+    uint8_t got[4];
+    uint8_t i;
+    uint8_t match = 1U;
+
+    if (hads == NULL)
+        return HAL_ERROR;
+
+    /* 先取出驱动认为已经写入的值。 */
+    for (i = 0; i < 4U; i++)
+        want[i] = hads->config[i];
+
+    /* ADS1220_ReadAllRegs 会把芯片实际值刷新进 hads->config[]。 */
+    if (ADS1220_ReadAllRegs(hads) != HAL_OK)
+        return HAL_ERROR;
+
+    for (i = 0; i < 4U; i++)
+    {
+        got[i] = hads->config[i];
+        if (got[i] != want[i])
+            match = 0U;
+    }
+
+    if (expected != NULL)
+    {
+        for (i = 0; i < 4U; i++)
+            expected[i] = want[i];
+    }
+
+    if (actual != NULL)
+    {
+        for (i = 0; i < 4U; i++)
+            actual[i] = got[i];
+    }
+
+    return (match != 0U) ? HAL_OK : HAL_ERROR;
+}
+
 HAL_StatusTypeDef ADS1220_SetChannel(ADS1220_Handle_t *hads, ADS1220_Channel_t channel)
 {
     uint8_t cfg0 = hads->config[ADS1220_REG_CONFIG0];

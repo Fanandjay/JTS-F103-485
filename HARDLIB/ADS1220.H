@@ -273,6 +273,35 @@ HAL_StatusTypeDef ADS1220_ReadReg(ADS1220_Handle_t *hads, uint8_t reg, uint8_t *
 HAL_StatusTypeDef ADS1220_WriteReg(ADS1220_Handle_t *hads, uint8_t reg, uint8_t data);
 HAL_StatusTypeDef ADS1220_ReadAllRegs(ADS1220_Handle_t *hads);
 
+/*==============================================================================
+ * 配置期望值与回读校验
+ *============================================================================*/
+
+/**
+ * @brief 回读 CONFIG0..3，并与驱动内部记录的期望值比对。
+ *
+ * 期望值取自 hads->config[]（即所有 Set* 写入后的结果），因此校验对象
+ * 与实际写入内容同源，不需要在调用方重复硬编码寄存器期望值。
+ * 校验完成后 hads->config[] 会被刷新为芯片的实际值。
+ *
+ * @param hads     器件句柄
+ * @param expected 输出：写入后期望的 4 个寄存器值，可为 NULL
+ * @param actual   输出：从芯片读回的实际 4 个寄存器值，可为 NULL
+ * @return HAL_OK 表示 4 个寄存器完全一致，否则 HAL_ERROR
+ */
+HAL_StatusTypeDef ADS1220_VerifyConfig(ADS1220_Handle_t *hads,
+                                       uint8_t expected[4],
+                                       uint8_t actual[4]);
+
+/* 句柄当前增益的实际数值 (1/2/4/.../128)，用于调试打印 */
+uint8_t ADS1220_GetGainValue(ADS1220_Handle_t *hads);
+
+/* 数据速率枚举 -> 实际采样率 (SPS)，越界返回 0，用于调试打印 */
+uint16_t ADS1220_DataRateSps(ADS1220_DataRate_t rate);
+
+/* 通道枚举 -> 名称字符串，越界返回 "unknown"，仅用于调试打印 */
+const char *ADS1220_ChannelName(ADS1220_Channel_t channel);
+
 HAL_StatusTypeDef ADS1220_SetChannel(ADS1220_Handle_t *hads, ADS1220_Channel_t channel);
 HAL_StatusTypeDef ADS1220_SetGain(ADS1220_Handle_t *hads, ADS1220_Gain_t gain);
 HAL_StatusTypeDef ADS1220_SetDataRate(ADS1220_Handle_t *hads, ADS1220_DataRate_t rate);
