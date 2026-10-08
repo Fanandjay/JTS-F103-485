@@ -562,6 +562,135 @@ uint8_t ADS1220_IsDataReady(ADS1220_Handle_t *hads)
     return 0;
 }
 
+/*==============================================================================
+ * === DRDY 波形观测（诊断用） ===
+ *============================================================================*/
+
+/* 使能并验证 DWT 周期计数器。它由 Cortex-M3 内核自带，不占用定时器资源。
+ * 返回 1 表示可用（计数器确实在递增），0 表示不可用。 */
+static uint8_t ADS1220_DwtEnable(void)
+{
+    uint32_t before;
+    volatile uint32_t i;
+
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0U;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+    /* 必须验证：某些配置下 CYCCNT 不会递增，
+     * 若不检查会让后面所有时间量都变成 0，反而误导判断。 */
+    before = DWT->CYCCNT;
+    for (i = 0U; i < 200U; i++)
+    {
+        __NOP();
+    }
+
+    return (DWT->CYCCNT != before) ? 1U : 0U;
+}
+
+HAL_StatusTypeDef ADS1220_ObserveDrdy(ADS1220_Handle_t *hads,
+                                      uint32_t duration_ms,
+                                      ADS1220_DrdyStats_t *stats)
+{
+    uint32_t cycles_per_us;
+    uint32_t limit_cycles;
+    uint32_t t0;
+    uint32_t t_end;
+    uint32_t now;
+    uint32_t low_len;
+    uint32_t low_start = 0U;
+    uint32_t low_max = 0U;
+    uint32_t low_pending = 0U;
+    uint32_t samples = 0U;
+    uint32_t high_cnt = 0U;
+    uint32_t low_cnt = 0U;
+    uint32_t edges = 0U;
+    uint8_t  prev;
+    uint8_t  level;
+
+    if ((hads == NULL) || (stats == NULL) || (duration_ms == 0U))
+        return HAL_ERROR;
+
+    /* 先全部清零，保证任何提前返回都不会留下脏数据 */
+    stats->duration_us    = 0U;
+    stats->samples        = 0U;
+    stats->falling_edges  = 0U;
+    stats->high_samples   = 0U;
+    stats->low_samples    = 0U;
+    stats->low_us_max     = 0U;
+    stats->low_us_pending = 0U;
+    stats->level_at_end   = 0U;
+
+    if (ADS1220_DwtEnable() == 0U)
+        return HAL_ERROR;
+
+    cycles_per_us = SystemCoreClock / 1000000U;
+    if (cycles_per_us == 0U)
+        return HAL_ERROR;
+
+    limit_cycles = cycles_per_us * 1000U * duration_ms;
+
+    /* 1 = DRDY 为低（转换结果就绪） */
+    prev = ADS1220_IsDataReady(hads);
+    if (prev != 0U)
+        low_start = DWT->CYCCNT;
+
+    t0 = DWT->CYCCNT;
+
+    for (;;)
+    {
+        level = ADS1220_IsDataReady(hads);
+        now   = DWT->CYCCNT;
+
+        samples++;
+
+        if (level != 0U)
+        {
+            low_cnt++;
+            if (prev == 0U)
+                low_start = now;            /* 下降沿：进入低电平 */
+        }
+        else
+        {
+            high_cnt++;
+            if (prev != 0U)
+            {
+                /* 上升沿：结算一段完整的低电平 */
+                low_len = now - low_start;
+                if (low_len > low_max)
+                    low_max = low_len;
+            }
+        }
+
+        if ((prev == 0U) && (level != 0U))
+            edges++;
+
+        prev = level;
+
+        if ((now - t0) >= limit_cycles)
+            break;
+    }
+
+    t_end = DWT->CYCCNT;
+
+    /* 窗口结束时若仍处于低电平，这段还没"结算"，单独记录 */
+    if (prev != 0U)
+    {
+        stats->level_at_end = 1U;
+        low_pending = t_end - low_start;
+    }
+
+    stats->duration_us    = (t_end - t0) / cycles_per_us;
+    stats->samples        = samples;
+    stats->falling_edges  = edges;
+    stats->high_samples   = high_cnt;
+    stats->low_samples    = low_cnt;
+    stats->low_us_max     = low_max / cycles_per_us;
+    stats->low_us_pending = low_pending / cycles_per_us;
+
+    return HAL_OK;
+}
+
 HAL_StatusTypeDef ADS1220_WaitForDataReady(ADS1220_Handle_t *hads, uint32_t timeout)
 {
     uint32_t tickstart = HAL_GetTick();

@@ -314,6 +314,50 @@ HAL_StatusTypeDef ADS1220_VerifyConfig(ADS1220_Handle_t *hads,
  */
 HAL_StatusTypeDef ADS1220_ConnectionTest(ADS1220_Handle_t *hads);
 
+/**
+ * @brief DRDY 波形观测结果（诊断用）。
+ *
+ * 用于在没有示波器时判定 DOUT/DRDY 属于哪一类行为：
+ *
+ *   - **锁存型**（老 DRDY 模式，CONFIG3.DRDYM = 0）
+ *     转换完成后拉低，并**保持低直到转换结果被读走**。
+ *     因此在"只观测不读取"的窗口内只会出现 1 个下降沿，之后长期为低
+ *     —— 轮询方案可以正常工作。
+ *
+ *   - **脉冲型**（新 DRDY 模式，CONFIG3.DRDYM = 1）
+ *     每次转换完成后短暂拉低随即自行回高。
+ *     下降沿数量约等于转换次数，低电平占空比很小
+ *     —— **轮询方案会大量漏检，必须改用 EXTI 中断**。
+ */
+typedef struct
+{
+    uint32_t duration_us;     /*!< 实际观测窗口时长 (us) */
+    uint32_t samples;         /*!< 采样点数，用于评估时间分辨率 */
+    uint32_t falling_edges;   /*!< 观测到的下降沿次数 */
+    uint32_t high_samples;    /*!< DRDY 为高（未就绪）的采样点数 */
+    uint32_t low_samples;     /*!< DRDY 为低（就绪）的采样点数 */
+    uint32_t low_us_max;      /*!< 已完整测到的最长一段连续低电平 (us) */
+    uint32_t low_us_pending;  /*!< 窗口结束时若仍为低，该段已持续时长 (us) */
+    uint8_t  level_at_end;    /*!< 1 = 窗口结束时 DRDY 仍为低 */
+} ADS1220_DrdyStats_t;
+
+/**
+ * @brief 在指定时长内高速采样 DOUT/DRDY，统计其波形特征。
+ *
+ * 只读取引脚电平，**不做任何 SPI 传输**，因此不会改变 ADS1220 的状态。
+ * 调用前应已启动连续转换，否则不会产生下降沿。
+ *
+ * 计时使用 Cortex-M3/M4 自带的 DWT 周期计数器（微秒级，无需占用定时器）。
+ *
+ * @param hads        器件句柄
+ * @param duration_ms 观测时长 (ms)
+ * @param stats       输出：统计结果
+ * @return HAL_OK 成功；参数非法或 DWT 不可用返回 HAL_ERROR
+ */
+HAL_StatusTypeDef ADS1220_ObserveDrdy(ADS1220_Handle_t *hads,
+                                      uint32_t duration_ms,
+                                      ADS1220_DrdyStats_t *stats);
+
 /* 句柄当前增益的实际数值 (1/2/4/.../128)，用于调试打印 */
 uint8_t ADS1220_GetGainValue(ADS1220_Handle_t *hads);
 

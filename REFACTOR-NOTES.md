@@ -101,8 +101,19 @@ Core/Src/main.c             只剩 HAL 初始化 + 时钟 + Error_Handler（89 �
 [7] Starting continuous conversion...
      [OK] Continuous conversion started
 
+[8] Observing DRDY for 200 ms (read-only)...
+     window     : 200001 us, 421337 samples
+     edges      : 1 falling
+     low duty   : 74.8 %
+     longest low: 0 us
+     still LOW  : 149600 us at window end
+     => LATCHED - polling is OK
+
 Ready. Send 0 to start output, 1 to stop output.
 ```
+
+> 第 [8] 步的数值因板而异，上面只是一份"锁存型且工作正常"的样例。
+> **判定方法见第 13 节。**
 
 ### 故障时的新行为
 
@@ -111,7 +122,9 @@ Ready. Send 0 to start output, 1 to stop output.
 | 第 [3] 步打印 `FF FF FF FF` 并报 `ADS1220 not responding` | DOUT/MISO 恒高：芯片未焊接 / 未供电 / 片选或时钟异常 |
 | 第 [4] 步报 `SPI write path broken` | 写不进芯片，或写进去读不回来，SPI 通路故障 |
 | 第 [6] 步逐寄存器打印 `expect 0xNN, actual 0xNN` | 配置没写进去或读回链路有问题，对照两列即可定位 |
-| 以上任一失败 | 打印原因后**停机**（不再静默带病运行） |
+| 第 [8] 步报 `DWT cycle counter unavailable` | 内核周期计数器不可用（少见），该步跳过，其余功能不受影响 |
+| 第 [8] 步报 `PULSING` | **DRDY 是脉冲型，轮询方案必然丢数，必须改用 EXTI** |
+| 以上任一失败（除第 [8] 步的 WARN） | 打印原因后**停机**（不再静默带病运行） |
 
 ---
 
@@ -384,3 +397,65 @@ App_Report_Printf("ADC invalid sample count=%lu\r\n", ...);   /* 已删除 */
 
 - **`APP_DRDY_TIMEOUT_MS` 60 → 20**：原值大于 50 ms 转换周期，一旦 DRDY 不回高，超时会变成采样节拍器把速率拖到约 16 帧/秒。20 ms 留 2.5 倍裕量。
 - **`App_Measure_Poll` 的解锁分支拆成两路**：正常解锁（DRDY 回高）与异常解锁（超时）分开，后者累加到 CH7。行为与原来完全等价，只是变得可观测。
+
+---
+
+## 13. 自检第 [8] 步读表说明（DRDY 波形判定）
+
+### 为什么需要这一步
+
+轮询方案能否工作，**完全取决于 DOUT/DRDY 是哪一类波形**：
+
+| 波形类型 | 行为 | 轮询结果 |
+|---|---|---|
+| **锁存型**（`CONFIG3.DRDYM = 0`，老模式） | 转换完成后拉低，**保持低直到被读走** | 随时去看都是低 → **不会漏** |
+| **脉冲型**（`DRDYM = 1`，新模式） | 每次转换完成后**短暂拉低随即自行回高** | 轮询间隔约 3.7 ms，大概率错过 → **大量漏检** |
+
+当前实测数据强烈指向脉冲型：帧间隔呈 **25 ms / ~195 ms 双峰**，且
+**CH5 + CH6 = 9 ≠ 20**（每秒漏掉约 11 次转换）。若 DRDY 是约 1 ms 的脉冲，
+则 1 ms ÷ 3.7 ms 轮询间隔 ≈ 1/4 命中率，正好解释"195 ms 错过约 3 次"。
+
+### 这一步做了什么
+
+在 `ADS1220_Start()` **之后**（转换已在跑），用 DWT 周期计数器计时，
+在 **200 ms** 内高速空转采样 PB14 —— **只读引脚、不发 SPI、不读数据**：
+
+| 统计量 | 含义 |
+|---|---|
+| `edges` | 观测到的下降沿次数 |
+| `low duty` | DRDY 为低的采样点占比 |
+| `longest low` | 已完整测到的最长一段连续低电平 |
+| `still LOW` | 窗口结束时若仍为低，该段已持续时长 |
+
+因为窗口内 **不读取**，DRDY 不会被读走，波形特征得以直接暴露。
+
+### 判定表
+
+| 观测结果 | 波形类型 | 对策 |
+|---|---|---|
+| `edges` ≈ 4（20SPS×0.2s），`low duty` 很小（<5%），`longest low` ≈ 1 ms | **脉冲型 PULSING** | **必须改用 EXTI**，轮询无解 |
+| `edges` 0~1，`still LOW` > 50 ms，`low duty` 较高 | **锁存型 LATCHED** | 轮询可行，问题在别处（见下） |
+| `edges` ≈ 1，`longest low` ≈ 整个窗口 | DRDY **恒低** | 查 PB14 硬件：短路 / 驱动冲突 |
+| `edges` = 0，`low duty` = 0 | DRDY **恒高** | 查 ADS1220 供电 / START / DRDY 接线 |
+| `edges` 远多于 4（例如 ≈ 20） | 转换率偏高 | 查 CONFIG1 回读、时钟源 |
+| `edges` ≈ 1 但 `low duty` 很低、`longest low` ≈ 1 ms | 转换率偏低 | 同上 |
+| 打印 `DWT cycle counter unavailable` | 计时不可用 | 本步跳过，改用示波器 |
+
+### 各结果对应的下一步
+
+**若判定 PULSING** → `CH5+CH6=9` 的谜团就解开了。
+→ 下一步是**实现 EXTI + 环形缓冲**，并处理 PB14 复用冲突（读数据前屏蔽 EXTI、读完恢复、清挂起）。
+
+**若判定 LATCHED** → 漏读原因在别处。结合 CH7 持续增长，重点查：
+1. 读完数据后 DRDY 为什么没回高 —— SPI 模式/CPHA、CS 时序
+2. 把原代码里那段被删除的 `/* CPHA=1 errata workaround */` NOP 延时段恢复后回测
+
+**若恒高 / 恒低** → 先当硬件问题查，用示波器确认 PB14 的实际波形。
+
+### 技术说明
+
+- 计时使用 Cortex-M3 内核自带的 **DWT 周期计数器**（72 MHz → 13.9 ns 分辨率），**不占用任何定时器资源**
+- 200 ms 内约 40 万个采样点（≈0.5 µs 一个点），足以分辨毫秒级脉冲
+- 本步**不禁用中断**：SysTick 与 USART 中断会带来少量采样间隙。
+  待测脉冲在毫秒量级，远长于任何 ISR，不影响判定
+- 该步只读引脚，**不改变 ADS1220 任何状态**，可以安全地反复调用

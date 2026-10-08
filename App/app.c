@@ -54,6 +54,70 @@ static void App_Cmd_StartTare(void)
  * 不会再出现"打印 64x 却写 128x"这类不一致。
  *============================================================================*/
 
+/**
+ * @brief 自检第 8 步：观测 DOUT/DRDY 波形，判定它是锁存型还是脉冲型。
+ *
+ * 这一步只读引脚、不发 SPI，窗口内也不读取转换结果，
+ * 因此 DRDY 不会被读走，波形特征能直接暴露出来：
+ *
+ *   锁存型（DRDYM=0）→ 只出现 0~1 个下降沿，之后长期保持低
+ *   脉冲型（DRDYM=1）→ 下降沿数量≈转换次数，低电平占空比很小
+ *
+ * 结论决定轮询方案是否可行：脉冲型下轮询必然大量漏检，必须改用 EXTI。
+ */
+static void App_SelfTest_ObserveDrdy(void)
+{
+    ADS1220_DrdyStats_t drdy;
+    uint32_t duty_permille = 0U;
+    const char *verdict;
+
+    App_Report_Printf("[8] Observing DRDY for %u ms (read-only)...\r\n",
+                      (unsigned)APP_DRDY_OBSERVE_MS);
+
+    if (ADS1220_ObserveDrdy(&s_hads, APP_DRDY_OBSERVE_MS, &drdy) != HAL_OK)
+    {
+        App_Report_Printf("     [WARN] DWT cycle counter unavailable - skipped\r\n");
+        return;
+    }
+
+    if (drdy.samples > 0U)
+        duty_permille = (drdy.low_samples * 1000U) / drdy.samples;
+
+    App_Report_Printf("     window     : %lu us, %lu samples\r\n",
+                      (unsigned long)drdy.duration_us,
+                      (unsigned long)drdy.samples);
+    App_Report_Printf("     edges      : %lu falling\r\n",
+                      (unsigned long)drdy.falling_edges);
+    App_Report_Printf("     low duty   : %lu.%lu %%\r\n",
+                      (unsigned long)(duty_permille / 10U),
+                      (unsigned long)(duty_permille % 10U));
+    App_Report_Printf("     longest low: %lu us\r\n",
+                      (unsigned long)drdy.low_us_max);
+
+    if (drdy.level_at_end != 0U)
+    {
+        App_Report_Printf("     still LOW  : %lu us at window end\r\n",
+                          (unsigned long)drdy.low_us_pending);
+    }
+
+    /* 判定：脉冲型会产生多个下降沿；锁存型只会有 0~1 个且末尾仍为低 */
+    if (drdy.falling_edges >= 2U)
+    {
+        verdict = "PULSING - polling WILL miss, use EXTI";
+    }
+    else if ((drdy.level_at_end != 0U) &&
+             (drdy.low_us_pending > (drdy.duration_us / 4U)))
+    {
+        verdict = "LATCHED - polling is OK";
+    }
+    else
+    {
+        verdict = "UNCLEAR - read the figures above";
+    }
+
+    App_Report_Printf("     => %s\r\n\r\n", verdict);
+}
+
 static HAL_StatusTypeDef App_SelfTest(void)
 {
     uint8_t expected[4];
@@ -176,7 +240,10 @@ static HAL_StatusTypeDef App_SelfTest(void)
         App_Report_Printf("     [ERROR] Failed to start continuous conversion!\r\n");
         return HAL_ERROR;
     }
-    App_Report_Printf("     [OK] Continuous conversion started\r\n");
+    App_Report_Printf("     [OK] Continuous conversion started\r\n\r\n");
+
+    /* 8. DRDY 波形观测：判定轮询方案是否可行（脉冲型必须改 EXTI） */
+    App_SelfTest_ObserveDrdy();
 
     return HAL_OK;
 }
