@@ -44,8 +44,20 @@ typedef struct
     MovingAverage5_t    moving_average;
     FirstOrderLowPass_t lowpass;
 
-    /* 统计 */
-    uint32_t invalid_sample_count;     /*!< 读回全 1 等无效样本计数 */
+    /* 累计统计 */
+    uint32_t invalid_sample_count;     /*!< 读回全 1 等无效样本累计数 */
+    uint32_t drdy_timeout_count;       /*!< DRDY 超时强制解锁累计次数（正常恒为 0） */
+
+    /* 每秒统计窗口（原始累加量） */
+    uint32_t window_tick;              /*!< 统计窗口起点 */
+    uint32_t frames_in_window;         /*!< 本窗口内成功发出的帧数 */
+    uint32_t invalid_in_window;        /*!< 本窗口内无效样本数 */
+    uint32_t loop_period_max;          /*!< 本窗口内主循环最长周期 (ms) */
+
+    /* 每秒统计窗口（上报给上位机的值） */
+    uint32_t frames_per_second;        /*!< 上一窗口的输出帧率 */
+    uint32_t invalid_per_second;       /*!< 上一窗口的无效样本数 */
+    uint32_t loop_period_max_reported; /*!< 上一窗口的主循环最长周期 (ms) */
 } App_Measure_t;
 
 /* 初始化采集上下文（清零并绑定句柄）。 */
@@ -61,6 +73,17 @@ void App_Measure_StartTare(App_Measure_t *measure);
 
 /* 主循环调用：推进 DRDY 轮询与采样处理，不阻塞。 */
 void App_Measure_Poll(App_Measure_t *measure);
+
+/**
+ * @brief 主循环把自己的周期上报给采集模块，用于诊断最长阻塞。
+ *
+ * 该值只用于诊断通道 CH8。若它接近 ADC 转换周期，说明主循环余量不足，
+ * 采样会开始被主循环拖慢。
+ *
+ * @param measure   采集上下文
+ * @param period_ms 距上一次 App_Loop 调用的毫秒数
+ */
+void App_Measure_NoteLoopPeriod(App_Measure_t *measure, uint32_t period_ms);
 
 #ifdef __cplusplus
 }

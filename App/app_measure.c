@@ -15,13 +15,14 @@
  * 芯片未响应或输入超范围），视为无效样本丢弃。 */
 #define APP_MEASURE_INVALID_CODE  0xFFFFFFFFUL
 
-/* 无效样本提示的打印间隔 */
-#define APP_MEASURE_INVALID_REPORT_INTERVAL  20U
+/* 诊断统计窗口长度 (ms) */
+#define APP_MEASURE_DIAG_WINDOW_MS  1000U
 
 static void App_Measure_ReportTareDone(App_Measure_t *measure);
 static void App_Measure_CollectTareSample(App_Measure_t *measure, int32_t raw);
 static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw);
 static void App_Measure_HandleSample(App_Measure_t *measure);
+static void App_Measure_DiagTick(App_Measure_t *measure);
 
 void App_Measure_Init(App_Measure_t *measure,
                       ADS1220_Handle_t *hads,
@@ -33,6 +34,7 @@ void App_Measure_Init(App_Measure_t *measure,
     memset(measure, 0, sizeof(*measure));
     measure->hads = hads;
     measure->huart = huart;
+    measure->window_tick = HAL_GetTick();
 }
 
 void App_Measure_SetOutput(App_Measure_t *measure, uint8_t enable)
@@ -68,6 +70,9 @@ void App_Measure_Poll(App_Measure_t *measure)
     if (measure == NULL || measure->hads == NULL)
         return;
 
+    /* 诊断窗口刷新必须早于所有 return，保证停止输出/去皮期间统计不中断。 */
+    App_Measure_DiagTick(measure);
+
     data_ready = ADS1220_IsDataReady(measure->hads);
 
     /* 既不输出也不去皮时，完全不做采集。 */
@@ -80,12 +85,19 @@ void App_Measure_Poll(App_Measure_t *measure)
 
     if (measure->drdy_read_locked != 0U)
     {
-        /* 正常路径：DOUT/DRDY 回高即解锁；超时解锁用于防止状态机卡死。 */
-        if (data_ready == 0U ||
-            (HAL_GetTick() - measure->drdy_lock_tick) >= APP_DRDY_TIMEOUT_MS)
+        if (data_ready == 0U)
         {
+            /* 正常路径：读取后 DOUT/DRDY 已回高，解锁。 */
             measure->drdy_read_locked = 0U;
             measure->drdy_low_count = 0U;
+        }
+        else if ((HAL_GetTick() - measure->drdy_lock_tick) >= APP_DRDY_TIMEOUT_MS)
+        {
+            /* 异常路径：DRDY 迟迟不回高，超时强制解锁并计数。
+             * 正常运行时本分支永不进入，CH7 应恒为 0。 */
+            measure->drdy_read_locked = 0U;
+            measure->drdy_low_count = 0U;
+            measure->drdy_timeout_count++;
         }
         return;
     }
@@ -119,12 +131,11 @@ static void App_Measure_HandleSample(App_Measure_t *measure)
 
     if ((uint32_t)raw == APP_MEASURE_INVALID_CODE)
     {
+        /* 只计数、不打字。
+         * 数据流是 JustFloat 二进制帧，混入任何 ASCII 文本都会破坏上位机的
+         * 帧同步，造成"看起来丢帧"的假象。该计数改由诊断通道 CH6 回传。 */
         measure->invalid_sample_count++;
-        if ((measure->invalid_sample_count % APP_MEASURE_INVALID_REPORT_INTERVAL) == 0U)
-        {
-            App_Report_Printf("ADC invalid sample count=%lu\r\n",
-                              (unsigned long)measure->invalid_sample_count);
-        }
+        measure->invalid_in_window++;
         return;
     }
 
@@ -212,5 +223,56 @@ static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw)
                              APP_VREF_MV,
                              ADS1220_GetGainValue(measure->hads));
 
-    (void)VOFA_JustFloat_Send(measure->huart, vofa_values, APP_VOFA_CHANNELS);
+    /* 诊断通道：每秒刷新一次，帧间保持不变，上位机看到阶梯状。
+     * 这些值让固件自证"实际输出速率"，不必再靠上位机抓包反推。 */
+    vofa_values[APP_VOFA_CH_RATE]    = (float)measure->frames_per_second;
+    vofa_values[APP_VOFA_CH_INVALID] = (float)measure->invalid_per_second;
+    vofa_values[APP_VOFA_CH_TIMEOUT] = (float)measure->drdy_timeout_count;
+    vofa_values[APP_VOFA_CH_LOOPMAX] = (float)measure->loop_period_max_reported;
+
+    /* 只统计真正发出去的帧，UART 失败不计入，避免把速率算高。 */
+    if (VOFA_JustFloat_Send(measure->huart, vofa_values,
+                            APP_VOFA_CHANNELS) == HAL_OK)
+    {
+        measure->frames_in_window++;
+    }
+}
+
+void App_Measure_NoteLoopPeriod(App_Measure_t *measure, uint32_t period_ms)
+{
+    if (measure == NULL)
+        return;
+
+    if (period_ms > measure->loop_period_max)
+        measure->loop_period_max = period_ms;
+}
+
+/**
+ * @brief 每秒刷新一次诊断统计窗口。
+ *
+ * 把本窗口累加的三个量提交为"上报值"，再清零开始下一窗口。
+ * 上报值只在窗口边界变化，因此每帧都携带的是"上一秒的统计结果"，
+ * 上位机直接读 CH5~CH8 即可。
+ */
+static void App_Measure_DiagTick(App_Measure_t *measure)
+{
+    uint32_t now = HAL_GetTick();
+
+    if ((now - measure->window_tick) < APP_MEASURE_DIAG_WINDOW_MS)
+        return;
+
+    measure->frames_per_second        = measure->frames_in_window;
+    measure->invalid_per_second       = measure->invalid_in_window;
+    measure->loop_period_max_reported = measure->loop_period_max;
+
+    measure->frames_in_window  = 0U;
+    measure->invalid_in_window = 0U;
+    measure->loop_period_max   = 0U;
+
+    measure->window_tick += APP_MEASURE_DIAG_WINDOW_MS;
+
+    /* 若窗口被拖得落后超过一个周期（主循环长时间被阻塞），直接对齐，
+     * 避免窗口起点持续累积漂移导致上报速率被高估。 */
+    if ((now - measure->window_tick) >= APP_MEASURE_DIAG_WINDOW_MS)
+        measure->window_tick = now;
 }

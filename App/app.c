@@ -19,6 +19,9 @@
 static ADS1220_Handle_t s_hads;
 static App_Measure_t    s_measure;
 
+/* 上一次 App_Loop 进入时刻，用于统计主循环周期（诊断通道 CH8） */
+static uint32_t s_last_loop_tick;
+
 /*==============================================================================
  * 串口命令处理
  *============================================================================*/
@@ -187,6 +190,8 @@ void App_Init(void)
     App_Report_Init(&huart1);
     App_Measure_Init(&s_measure, &s_hads, &huart1);
 
+    s_last_loop_tick = HAL_GetTick();
+
     if (App_Shell_Init(&huart1) != HAL_OK)
     {
         App_Report_Printf("ERROR: UART receive interrupt failed to start\r\n");
@@ -211,7 +216,14 @@ void App_Init(void)
 
 void App_Loop(void)
 {
+    uint32_t now    = HAL_GetTick();
+    uint32_t period = now - s_last_loop_tick;
+    s_last_loop_tick = now;
+
     App_Shell_Poll();
+    /* 把主循环周期上报给采集模块，由诊断通道 CH8 回传。
+     * 若该值接近 ADC 转换周期（20 SPS 时为 50ms），说明主循环余量不足。 */
+    App_Measure_NoteLoopPeriod(&s_measure, period);
     App_Measure_Poll(&s_measure);
     HAL_Delay(1);
 }

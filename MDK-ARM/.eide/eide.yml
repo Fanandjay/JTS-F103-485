@@ -57,7 +57,9 @@ virtualFolder:
         - path: ../HARDLIB/ADS1220.C
         - path: ../HARDLIB/ADS1220.H
         - path: ../HARDLIB/Filter.c
+        - path: ../HARDLIB/Filter.h
         - path: ../HARDLIB/VOFA.c
+        - path: ../HARDLIB/VOFA.h
       folders: []
     - name: App
       files:
