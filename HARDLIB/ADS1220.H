@@ -358,6 +358,42 @@ HAL_StatusTypeDef ADS1220_ObserveDrdy(ADS1220_Handle_t *hads,
                                       uint32_t duration_ms,
                                       ADS1220_DrdyStats_t *stats);
 
+/**
+ * @brief "读取后 DRDY 行为 + 真实转换周期"探测结果。
+ */
+typedef struct
+{
+    uint8_t  rounds_done;       /*!< 实际完成的轮数 */
+    uint8_t  high_ok_rounds;    /*!< 其中"读完后 DRDY 回高"的轮数 */
+    uint32_t high_wait_us_max;  /*!< 读完后 DRDY 回高的最长耗时 (us) */
+    uint32_t period_us_min;     /*!< 实测转换周期最小值 (us)，0 表示未测到 */
+    uint32_t period_us_max;     /*!< 实测转换周期最大值 (us) */
+    uint32_t period_us_avg;     /*!< 实测转换周期平均值 (us) */
+} ADS1220_ConvProbe_t;
+
+/**
+ * @brief 实测"读取后 DRDY 是否回高"以及真实的转换周期。
+ *
+ * 单轮流程：
+ *   1. 等 DRDY 变低（读取就绪）
+ *   2. 读走 3 字节转换结果（锁存型下这会让 DRDY 回高）
+ *   3. 计时：读完 -> DRDY 回高      —— 用于验证 DRDY 握手是否正常
+ *   4. 计时：DRDY 回高 -> 再次变低  —— 这就是一个完整转换周期
+ *
+ * 第 4 步的值**不受上电整定时间影响**，因此能直接回答
+ * "ADC 实际是不是配的那个速率"。多轮取平均可抑制抖动。
+ *
+ * @param hads       器件句柄
+ * @param rounds     轮数（建议 3）
+ * @param timeout_ms 每步等待超时 (ms)，应大于预期转换周期
+ * @param probe      输出：探测结果
+ * @return HAL_OK 成功；HAL_TIMEOUT 等待超时；HAL_ERROR 参数非法或 DWT 不可用
+ */
+HAL_StatusTypeDef ADS1220_ProbeConversion(ADS1220_Handle_t *hads,
+                                          uint32_t rounds,
+                                          uint32_t timeout_ms,
+                                          ADS1220_ConvProbe_t *probe);
+
 /* 句柄当前增益的实际数值 (1/2/4/.../128)，用于调试打印 */
 uint8_t ADS1220_GetGainValue(ADS1220_Handle_t *hads);
 

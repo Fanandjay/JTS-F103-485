@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    app_measure.h
- * @brief   采集状态机：DRDY 轮询 → 取数 → 去皮 → 滤波 → 输出。
+ * @brief   采集状态机：PB11 下降沿中断 → 取数 → 去皮 → 滤波 → 输出。
  *
  * @note    原先这些状态是散落在 main.c 里的 10 个 file-scope 变量，
  *          无法看出彼此关系，也无法整体复位。这里统一收进 App_Measure_t，
@@ -22,16 +22,26 @@ extern "C" {
 
 typedef struct
 {
+    int32_t raw_code;             /*!< 原始 ADC 码，不去皮、不滤波 */
+    float raw_voltage_mv;         /*!< 与 raw_code 对应的输入差分电压 */
+    int32_t filtered_code;        /*!< 去皮并滤波后的码值，与 VOFA CH3 相同 */
+    float filtered_voltage_mv;    /*!< 与 VOFA CH4 相同，单位 mV */
+    uint32_t sample_count;
+    uint32_t sample_tick;
+    uint8_t valid;
+} App_Measure_Snapshot_t;
+
+typedef struct
+{
     ADS1220_Handle_t   *hads;          /*!< 已初始化的 ADC 句柄 */
     UART_HandleTypeDef *huart;         /*!< VOFA+ 数据输出串口 */
 
-    uint8_t  output_enabled;           /*!< 非 0 表示正在输出样本 */
+    uint8_t  output_enabled;           /*!< 仅控制 VOFA 输出；ADC/Modbus 持续更新 */
     uint8_t  filter_started;           /*!< 非 0 表示滤波器已按首个有效样本初始化 */
 
-    /* DRDY 轮询状态 */
-    uint8_t  drdy_low_count;           /*!< 连续观察到低电平的次数 */
-    uint8_t  drdy_read_locked;         /*!< 已读取一次，等待 DRDY 回高 */
-    uint32_t drdy_lock_tick;           /*!< 进入锁定时的 tick，用于超时解锁 */
+    /* DRDY 中断同步状态（边沿计数由 EXTI 回调维护） */
+    uint32_t drdy_edge_seen;           /*!< 上次已消费的 DRDY 边沿计数 */
+    uint32_t drdy_last_data_tick;      /*!< 最近一次取数/同步的 tick，用于兜底计时 */
 
     /* 去皮（零点标定） */
     uint8_t  tare_running;             /*!< 非 0 表示正在采集零点 */
@@ -44,9 +54,11 @@ typedef struct
     MovingAverage5_t    moving_average;
     FirstOrderLowPass_t lowpass;
 
+    App_Measure_Snapshot_t latest; /*!< 持续更新，独立于 VOFA 输出开关 */
+
     /* 累计统计 */
     uint32_t invalid_sample_count;     /*!< 读回全 1 等无效样本累计数 */
-    uint32_t drdy_timeout_count;       /*!< DRDY 超时强制解锁累计次数（正常恒为 0） */
+    uint32_t drdy_timeout_count;       /*!< 中断缺席时兜底轮询命中次数（正常恒为 0） */
 
     /* 每秒统计窗口（原始累加量） */
     uint32_t window_tick;              /*!< 统计窗口起点 */
@@ -71,8 +83,13 @@ void App_Measure_SetOutput(App_Measure_t *measure, uint8_t enable);
 /* 开始去皮：暂停输出并清零零点累加器，等待 APP_TARE_SAMPLES 个有效样本。 */
 void App_Measure_StartTare(App_Measure_t *measure);
 
-/* 主循环调用：推进 DRDY 轮询与采样处理，不阻塞。 */
+/* 主循环调用：消费 DRDY 边沿计数并处理样本，独立于 VOFA 输出开关。
+ * 长时间未见新边沿时自动轮询一次 DRDY 电平兜底（命中计入 CH7）。 */
 void App_Measure_Poll(App_Measure_t *measure);
+
+/* 仅主循环调用。一次复制同一样本的码值、电压和采样时刻。 */
+void App_Measure_GetLatest(const App_Measure_t *measure,
+                          App_Measure_Snapshot_t *snapshot);
 
 /**
  * @brief 主循环把自己的周期上报给采集模块，用于诊断最长阻塞。

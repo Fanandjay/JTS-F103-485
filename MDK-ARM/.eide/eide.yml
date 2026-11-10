@@ -24,6 +24,7 @@ virtualFolder:
                 - path: ../Core/Src/gpio.c
                 - path: ../Core/Src/spi.c
                 - path: ../Core/Src/usart.c
+                - path: ../Core/Src/tim.c
                 - path: ../Core/Src/stm32f1xx_it.c
                 - path: ../Core/Src/stm32f1xx_hal_msp.c
               folders: []
@@ -60,9 +61,15 @@ virtualFolder:
         - path: ../HARDLIB/Filter.h
         - path: ../HARDLIB/VOFA.c
         - path: ../HARDLIB/VOFA.h
+        - path: ../HARDLIB/RS485.c
+        - path: ../HARDLIB/RS485.h
+        - path: ../HARDLIB/ModBus.c
+        - path: ../HARDLIB/ModBus.h
       folders: []
     - name: App
       files:
+        - path: ../App/app_modbus.c
+        - path: ../App/app_modbus.h
         - path: ../App/app.c
         - path: ../App/app.h
         - path: ../App/app_config.h
@@ -72,6 +79,8 @@ virtualFolder:
         - path: ../App/app_report.h
         - path: ../App/app_shell.c
         - path: ../App/app_shell.h
+        - path: ../App/app_led.c
+        - path: ../App/app_led.h
       folders: []
     - name: ::CMSIS
       files: []

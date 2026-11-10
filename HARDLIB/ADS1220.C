@@ -691,6 +691,104 @@ HAL_StatusTypeDef ADS1220_ObserveDrdy(ADS1220_Handle_t *hads,
     return HAL_OK;
 }
 
+HAL_StatusTypeDef ADS1220_ProbeConversion(ADS1220_Handle_t *hads,
+                                          uint32_t rounds,
+                                          uint32_t timeout_ms,
+                                          ADS1220_ConvProbe_t *probe)
+{
+    uint32_t cycles_per_us;
+    uint32_t timeout_cycles;
+    uint32_t t0;
+    uint32_t t1;
+    uint32_t t2;
+    uint32_t t3;
+    uint32_t i;
+    uint32_t w;
+    uint32_t p;
+    uint64_t period_sum = 0U;
+    int32_t  raw;
+
+    if ((hads == NULL) || (probe == NULL) || (rounds == 0U) || (timeout_ms == 0U))
+        return HAL_ERROR;
+
+    probe->rounds_done      = 0U;
+    probe->high_ok_rounds   = 0U;
+    probe->high_wait_us_max = 0U;
+    probe->period_us_min    = 0xFFFFFFFFUL;
+    probe->period_us_max    = 0U;
+    probe->period_us_avg    = 0U;
+
+    if (ADS1220_DwtEnable() == 0U)
+        return HAL_ERROR;
+
+    cycles_per_us = SystemCoreClock / 1000000U;
+    if (cycles_per_us == 0U)
+        return HAL_ERROR;
+
+    timeout_cycles = cycles_per_us * 1000U * timeout_ms;
+
+    for (i = 0U; i < rounds; i++)
+    {
+        /* 1) 等 DRDY 变低（转换结果就绪） */
+        t0 = DWT->CYCCNT;
+        while (ADS1220_IsDataReady(hads) == 0U)
+        {
+            if ((DWT->CYCCNT - t0) > timeout_cycles)
+                return HAL_TIMEOUT;
+        }
+
+        /* 2) 读走 3 字节转换结果 */
+        if (ADS1220_ReadDataContinuous(hads, &raw) != HAL_OK)
+            return HAL_ERROR;
+
+        /* 3) 等 DRDY 回高 —— 锁存型下读取会立即让它回高 */
+        t1 = DWT->CYCCNT;
+        while (ADS1220_IsDataReady(hads) != 0U)
+        {
+            if ((DWT->CYCCNT - t1) > timeout_cycles)
+                break;
+        }
+        t2 = DWT->CYCCNT;
+
+        if (ADS1220_IsDataReady(hads) != 0U)
+        {
+            /* 迟迟不回高：本轮无法测周期，但这件事本身就要报告 */
+            probe->rounds_done++;
+            continue;
+        }
+
+        w = (t2 - t1) / cycles_per_us;
+        probe->high_ok_rounds++;
+        if (w > probe->high_wait_us_max)
+            probe->high_wait_us_max = w;
+
+        /* 4) 计时到下一次 DRDY 变低 = 一个完整转换周期（不受上电整定影响） */
+        while (ADS1220_IsDataReady(hads) == 0U)
+        {
+            if ((DWT->CYCCNT - t2) > timeout_cycles)
+                return HAL_TIMEOUT;
+        }
+        t3 = DWT->CYCCNT;
+
+        p = (t3 - t2) / cycles_per_us;
+        period_sum += (uint64_t)p;
+        if (p < probe->period_us_min)
+            probe->period_us_min = p;
+        if (p > probe->period_us_max)
+            probe->period_us_max = p;
+
+        probe->rounds_done++;
+    }
+
+    if (probe->high_ok_rounds > 0U)
+        probe->period_us_avg = (uint32_t)(period_sum / (uint64_t)probe->high_ok_rounds);
+
+    if (probe->period_us_min == 0xFFFFFFFFUL)
+        probe->period_us_min = 0U;
+
+    return HAL_OK;
+}
+
 HAL_StatusTypeDef ADS1220_WaitForDataReady(ADS1220_Handle_t *hads, uint32_t timeout)
 {
     uint32_t tickstart = HAL_GetTick();

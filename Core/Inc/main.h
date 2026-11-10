@@ -59,8 +59,13 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define RS485_EN_Pin GPIO_PIN_1
 #define RS485_EN_GPIO_Port GPIOA
+#define ADS1220_DRDY_Pin GPIO_PIN_11
+#define ADS1220_DRDY_GPIO_Port GPIOB
+#define ADS1220_DRDY_EXTI_IRQn EXTI15_10_IRQn
 #define ADS1220_CS_Pin GPIO_PIN_12
 #define ADS1220_CS_GPIO_Port GPIOB
+#define LED_Pin GPIO_PIN_8
+#define LED_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 /* ADC 相关配置（基准电压、增益、速率、通道等）统一放在 App/app_config.h，

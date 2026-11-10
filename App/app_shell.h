@@ -47,6 +47,10 @@ HAL_StatusTypeDef App_Shell_Register(uint8_t command,
  */
 void App_Shell_Poll(void);
 
+/* 由 app.c 中统一的 HAL UART 回调分发。 */
+void App_Shell_OnRxComplete(UART_HandleTypeDef *huart);
+void App_Shell_OnError(UART_HandleTypeDef *huart);
+
 #ifdef __cplusplus
 }
 #endif

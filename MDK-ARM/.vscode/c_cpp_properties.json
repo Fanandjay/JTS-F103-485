@@ -3,15 +3,18 @@
         {
             "name": "20260703-ADS1220",
             "includePath": [
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Core\\Inc",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Drivers\\STM32F1xx_HAL_Driver\\Inc",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Drivers\\STM32F1xx_HAL_Driver\\Inc\\Legacy",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Drivers\\CMSIS\\Device\\ST\\STM32F1xx\\Include",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Drivers\\CMSIS\\Include",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\HARDLIB",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\MDK-ARM",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Core\\Src",
-                "d:\\stm32design\\项目历史\\多次转换20260703-ADS1220\\Drivers\\STM32F1xx_HAL_Driver\\Src"
+                "d:\\stm32design\\项目历史\\中断式+485\\Core\\Inc",
+                "d:\\stm32design\\项目历史\\中断式+485\\Drivers\\STM32F1xx_HAL_Driver\\Inc",
+                "d:\\stm32design\\项目历史\\中断式+485\\Drivers\\STM32F1xx_HAL_Driver\\Inc\\Legacy",
+                "d:\\stm32design\\项目历史\\中断式+485\\Drivers\\CMSIS\\Device\\ST\\STM32F1xx\\Include",
+                "d:\\stm32design\\项目历史\\中断式+485\\Drivers\\CMSIS\\Include",
+                "d:\\stm32design\\项目历史\\中断式+485\\HARDLIB",
+                "d:\\stm32design\\项目历史\\中断式+485\\App",
+                "D:\\keilpack\\keilpackcpre\\ARM\\ARMCC\\include",
+                "D:\\keilpack\\keilpackcpre\\ARM\\ARMCC\\include\\rw",
+                "d:\\stm32design\\项目历史\\中断式+485\\MDK-ARM",
+                "d:\\stm32design\\项目历史\\中断式+485\\Core\\Src",
+                "d:\\stm32design\\项目历史\\中断式+485\\Drivers\\STM32F1xx_HAL_Driver\\Src"
             ],
             "defines": [
                 "USE_HAL_DRIVER",

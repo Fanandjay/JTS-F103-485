@@ -26,17 +26,20 @@ extern "C" {
  * 修改这里即可同时改变：写入的寄存器、自检打印、回读校验期望值。
  *============================================================================*/
 #define APP_ADC_CHANNEL   ADS1220_CH5_AIN2_AIN3   /* 差分输入 AIN2-AIN3 */
-#define APP_ADC_GAIN      ADS1220_G64             /* PGA 增益 = 64 */
+#define APP_ADC_GAIN      ADS1220_G128            /* PGA 增益 = 128 */
 #define APP_ADC_DR        ADS1220_DR20            /* 数据速率 = 20 SPS */
 #define APP_ADC_MODE      ADS1220_MOD_NORM        /* 正常工作模式 */
 #define APP_ADC_CONV      ADS1220_CONV_CONT       /* 连续转换 */
 #define APP_ADC_VREF      ADS1220_VREF_EXT        /* 外部基准 REFP0/REFN0 */
 
-/* 片选与 DRDY 引脚。CS 由软件控制；DOUT/DRDY 与 SPI2 MISO 复用同一引脚 PB14 */
+/* 片选与 DRDY 引脚。CS 由软件控制。
+ * 新版硬件把 DOUT/DRDY 同时引到 PB11（专用 EXTI 监测脚），
+ * 采集状态机由"轮询 PB14"改为"PB11 下降沿中断驱动取数"；
+ * MISO 仍为 PB14。驱动的等就绪函数（自检诊断用）也统一走 PB11。 */
 #define APP_ADC_CS_PORT     ADS1220_CS_GPIO_Port
 #define APP_ADC_CS_PIN      ADS1220_CS_Pin
-#define APP_ADC_DRDY_PORT   GPIOB
-#define APP_ADC_DRDY_PIN    GPIO_PIN_14
+#define APP_ADC_DRDY_PORT   ADS1220_DRDY_GPIO_Port   /* PB11 */
+#define APP_ADC_DRDY_PIN    ADS1220_DRDY_Pin
 
 /*==============================================================================
  * 基准与物理量换算
@@ -53,10 +56,10 @@ extern "C" {
  *
  * 实际可用满量程受 AVDD 钳位 —— 数据手册规定 PGA 使能时：
  *   FS <= [ (AVDD - AVSS) - 0.4V ] / gain
- * 本板 AVDD = 5V、gain = 64：
- *   VREF/gain      = 5000 / 64     = 78.125 mV
- *   [(5-0)-0.4]/64 = 4.6  / 64     = 71.875 mV   <-- 实际取值
- * 即输入电压到不了 78.125 mV，靠近满量程的高约 8% 码值不可达。
+ * 本板 AVDD = 5V、gain = 128：
+ *   VREF/gain      = 5000 / 128    = 39.062 mV
+ *   [(5-0)-0.4]/128 = 4.6 / 128    = 35.938 mV   <-- 实际取值
+ * 4x350Ω 全桥 5V 激励满量程输出约 10 mV，远低于该上限，裕量充足。
  *
  * 另据数据手册 "REFPx 绝对输入 <= AVDD + 0.1V"，5V 激励直接接 REFP0
  * 要求 AVDD 必须约为 5V（本板已确认 AVDD = 5V）。
@@ -76,7 +79,7 @@ extern "C" {
  * 诊断通道（每秒刷新一次，帧间保持不变，上位机看到阶梯状）：
  *   CH5 = 固件实际输出帧率 (帧/秒)          正常 = 20
  *   CH6 = 每秒被判为无效的样本数            正常 = 0
- *   CH7 = DRDY 超时强制解锁的累计次数       正常恒为 0
+ *   CH7 = 中断缺席时兜底轮询的命中次数     正常恒为 0
  *   CH8 = 每秒内主循环最长周期 (ms)         正常 < 5
  *
  * 诊断通道的作用：把"实际输出速率"变成固件自证的数字，
@@ -92,7 +95,7 @@ extern "C" {
 #define APP_VOFA_CH_MV          3U
 #define APP_VOFA_CH_RATE        4U      /* 输出帧率 (帧/秒) */
 #define APP_VOFA_CH_INVALID     5U      /* 每秒无效样本数 */
-#define APP_VOFA_CH_TIMEOUT     6U      /* DRDY 超时累计次数 */
+#define APP_VOFA_CH_TIMEOUT     6U      /* 中断缺席兜底命中次数 */
 #define APP_VOFA_CH_LOOPMAX     7U      /* 每秒内主循环最长周期 (ms) */
 #define APP_VOFA_CHANNELS       8U      /* 4 数据 + 4 诊断 */
 
@@ -110,19 +113,15 @@ extern "C" {
 #define APP_TARE_SAMPLES  100U
 
 /*==============================================================================
- * DRDY 轮询配置
+ * DRDY 中断驱动配置（PB11 下降沿 EXTI）
  *============================================================================*/
-/* 连续观察到几次 DRDY 低电平才认为数据有效（抗毛刺） */
-#define APP_DRDY_CONFIRM        2U
+/* PB11 每次下降沿 = 一次新转换结果就绪。EXTI 回调只做计数，
+ * 取数在主循环（App_Measure_Poll）中完成，不在 ISR 里跑 SPI。 */
 
-/* 一次读取后等待 DRDY 回高的超时（ms），防止状态机卡死。
- *
- * 必须显著小于 ADC 转换周期，否则超时会变成采样节奏的"节拍器"，
- * 把输出速率拖到 1000/超时值：
- *   20 SPS  -> 转换周期 50 ms
- *   60 ms 超时 > 50 ms 转换周期 → 一旦 DRDY 不回高，速率塌到 ~16 帧/秒
- *   取 20 ms（2.5 倍裕量），并配合 CH7 超时计数器监控 */
-#define APP_DRDY_TIMEOUT_MS     20U
+/* 中断缺席兜底窗口 (ms)：超过该时长未见新边沿时，轮询一次 DRDY 电平。
+ * 必须大于预期转换周期（20 SPS -> 50 ms），否则会把正常节奏误判为丢中断。
+ * 取 100 ms（2 倍裕量）。兜底命中说明边沿丢失或 EXTI 未通，计入 CH7。 */
+#define APP_DRDY_IRQ_TIMEOUT_MS 100U
 
 /* DRDY 波形观测时长（ms）。
  * 自检最后一步会在这段时间内高速采样 DOUT/DRDY（只读引脚、不发 SPI），
@@ -130,10 +129,75 @@ extern "C" {
  * 200 ms 在 20 SPS 下可覆盖 4 次转换，足以区分两种波形。 */
 #define APP_DRDY_OBSERVE_MS     200U
 
+/* 转换周期实测（自检第 [9] 步）的轮数与单步超时。
+ * 超时必须大于预期转换周期：20 SPS -> 50 ms；这里取 500 ms 留足裕量，
+ * 这样即使实际速率远低于配置值也能测出真实值，而不是直接报超时。 */
+#define APP_CONV_PROBE_ROUNDS       3U
+#define APP_CONV_PROBE_TIMEOUT_MS   500U
+
+/*==============================================================================
+ * 速率扫描（自检第 [10] 步）
+ *
+ * 背景：第 [6] 步回读 CONFIG1=0x04（20 SPS / normal / 连续），但第 [9] 步
+ * 实测转换周期约 200 ms（5 SPS，恰为配置值的 1/4）。二者矛盾。
+ *
+ * 本步绕开枚举 API，直接把若干 DR/MODE 组合写进 CONFIG1 并逐个实测周期，
+ * 用于回答三个问题：
+ *   1. DR 位写进去到底生不生效（换一档速率周期变不变）
+ *   2. 分频是不是全局的（所有档位都 ÷4 => 时钟/MODE 异常）
+ *        还是只发生在 DR=000（=> 该档位解码异常）
+ *   3. 回读链路是否可信（write 与 readback 是否一致）
+ * 结果判读见 REFACTOR-NOTES.md 第 15 节。
+ *============================================================================*/
+/* 每个组合实测的轮数（前 1~2 轮含滤波器整定，判读以 min 为准） */
+#define APP_SWEEP_ROUNDS            5U
+/* 单步等待超时，须大于最慢一档的实际周期 + 整定时间（5 SPS -> 约 800 ms） */
+#define APP_SWEEP_TIMEOUT_MS        1200U
+
+/*==============================================================================
+ * 板载 LED（PA8，低电平点亮）调试心跳
+ *
+ * 由 SysTick 1ms 中断驱动（不占定时器外设），判读表见 App/app_led.h：
+ *   慢闪   = 正常运行（亮 ON_MS，灭至周期满）
+ *   常亮   = 主循环卡死（喂狗超时）
+ *   完全不变 = SysTick/时钟异常或程序跑飞
+ *============================================================================*/
+/* 心跳周期与点亮时长 */
+#define APP_LED_HEARTBEAT_PERIOD_MS  1000U
+#define APP_LED_HEARTBEAT_ON_MS      50U
+
+/* 喂狗超时：主循环超过该时长未调用 App_LED_Kick 即判卡死。
+ * 主循环含 HAL_Delay(1)，正常周期 ~1-2 ms，取 200 ms 留足裕量
+ * （自检阶段的串口打印、自检第 [8]~[11] 步的阻塞测量都远长于此，
+ * 因此门控只在主循环首帧喂狗之后才生效）。 */
+#define APP_LED_KICK_TIMEOUT_MS      200U
+
 /*==============================================================================
  * 串口命令配置
  *============================================================================*/
 #define APP_CMD_BUFFER_SIZE     32U
+
+/* Modbus RTU: USART2 PA2/PA3 + PA1(DE,/RE), TIM2 1 MHz counter.
+ * Serial format is set in CubeMX: 115200, 8E1 (9B + EVEN on STM32F1).
+ * 03 and 04 share a read-only register bank, addresses 0x0000..0x000D. */
+#define APP_MODBUS_SLAVE_ADDRESS       1U
+#define APP_RS485_TX_LEVEL             GPIO_PIN_SET
+#define APP_RS485_TX_TIMEOUT_MS        50U
+#define APP_MODBUS_STALE_MS            1000U
+
+/*==============================================================================
+ * 串口链路探针（诊断用，定位"banner 发不出"问题后可置 0 关闭）
+ *
+ * 上电先在 USART1/USART2 × RS485_EN 高/低 四种组合下各发一行 PROBE，
+ * 共 APP_UART_PROBE_ROUNDS 轮（约 0.5 s/轮）。先开终端再复位，
+ * 哪一行出现即说明适配器在哪个口、EN 需要什么电平。置 0 完全编译掉。
+ *
+ * 【2026-10-20 已定案】实测 PROBE A/B（USART1）出现、C/D（USART2）未出现：
+ * 调试串口 = USART1 PA9/PA10 直连 TTL，RS485_EN 与其无关，探针使命完成。
+ * 此前"无输出"系观察窗口问题：banner 在上电约 1 s 内打完，终端开晚了
+ * 会错过；VOFA 数据需发 '0' 才开始。保留宏便于日后复发时快速重开。
+ *============================================================================*/
+#define APP_UART_PROBE_ROUNDS   0U
 
 #ifdef __cplusplus
 }

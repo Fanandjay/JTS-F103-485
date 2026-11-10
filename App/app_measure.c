@@ -18,9 +18,24 @@
 /* 诊断统计窗口长度 (ms) */
 #define APP_MEASURE_DIAG_WINDOW_MS  1000U
 
+/*------------------------------------------------------------------------------
+ * DRDY 边沿计数（ISR 与主循环之间的同步通道）
+ *
+ * PB11 下降沿（新转换结果就绪）只把计数 +1，取数留给主循环做 ——
+ * ISR 里不碰 SPI。单写者（ISR）单读者（主循环）的 32 位计数
+ * 在 Cortex-M3 上天然原子，无需关中断。
+ *----------------------------------------------------------------------------*/
+static volatile uint32_t s_drdy_edges = 0U;
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == ADS1220_DRDY_Pin)
+        s_drdy_edges++;
+}
+
 static void App_Measure_ReportTareDone(App_Measure_t *measure);
 static void App_Measure_CollectTareSample(App_Measure_t *measure, int32_t raw);
-static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw);
+static void App_Measure_ProcessSample(App_Measure_t *measure, int32_t raw);
 static void App_Measure_HandleSample(App_Measure_t *measure);
 static void App_Measure_DiagTick(App_Measure_t *measure);
 
@@ -65,7 +80,7 @@ void App_Measure_StartTare(App_Measure_t *measure)
 
 void App_Measure_Poll(App_Measure_t *measure)
 {
-    uint8_t data_ready;
+    uint32_t edges_now;
 
     if (measure == NULL || measure->hads == NULL)
         return;
@@ -73,53 +88,32 @@ void App_Measure_Poll(App_Measure_t *measure)
     /* 诊断窗口刷新必须早于所有 return，保证停止输出/去皮期间统计不中断。 */
     App_Measure_DiagTick(measure);
 
-    data_ready = ADS1220_IsDataReady(measure->hads);
+    /* ADC 持续采集，Modbus 无需先发 '0'。output_enabled 只控制 VOFA。 */
 
-    /* 既不输出也不去皮时，完全不做采集。 */
-    if (measure->output_enabled == 0U && measure->tare_running == 0U)
+    /* 新边沿 = 新转换结果就绪（锁存型 DRDY 下读取会让它回高，
+     * 下一次下降沿必然对应新数据，不会重复读同一个样本）。 */
+    edges_now = s_drdy_edges;
+    if (measure->drdy_edge_seen != edges_now)
     {
-        measure->drdy_low_count = 0U;
-        measure->drdy_read_locked = 0U;
+        measure->drdy_edge_seen      = edges_now;
+        measure->drdy_last_data_tick = HAL_GetTick();
+        App_Measure_HandleSample(measure);
         return;
     }
 
-    if (measure->drdy_read_locked != 0U)
+    /* 中断缺席兜底：超过窗口仍未见新边沿，轮询一次 DRDY 电平。
+     * 命中说明边沿丢失或 EXTI 链路未通，计数进 CH7 供诊断；
+     * 电平为高（转换进行中）则只刷新计时，不打扰正常节奏。 */
+    if ((HAL_GetTick() - measure->drdy_last_data_tick) >= APP_DRDY_IRQ_TIMEOUT_MS)
     {
-        if (data_ready == 0U)
+        measure->drdy_last_data_tick = HAL_GetTick();
+
+        if (ADS1220_IsDataReady(measure->hads))
         {
-            /* 正常路径：读取后 DOUT/DRDY 已回高，解锁。 */
-            measure->drdy_read_locked = 0U;
-            measure->drdy_low_count = 0U;
-        }
-        else if ((HAL_GetTick() - measure->drdy_lock_tick) >= APP_DRDY_TIMEOUT_MS)
-        {
-            /* 异常路径：DRDY 迟迟不回高，超时强制解锁并计数。
-             * 正常运行时本分支永不进入，CH7 应恒为 0。 */
-            measure->drdy_read_locked = 0U;
-            measure->drdy_low_count = 0U;
             measure->drdy_timeout_count++;
+            App_Measure_HandleSample(measure);
         }
-        return;
     }
-
-    if (data_ready == 0U)
-    {
-        measure->drdy_low_count = 0U;
-        return;
-    }
-
-    /* 要求连续观察到 APP_DRDY_CONFIRM 次低电平，滤掉毛刺。 */
-    if (measure->drdy_low_count < APP_DRDY_CONFIRM)
-        measure->drdy_low_count++;
-
-    if (measure->drdy_low_count < APP_DRDY_CONFIRM)
-        return;
-
-    measure->drdy_read_locked = 1U;
-    measure->drdy_lock_tick = HAL_GetTick();
-    measure->drdy_low_count = 0U;
-
-    App_Measure_HandleSample(measure);
 }
 
 static void App_Measure_HandleSample(App_Measure_t *measure)
@@ -142,13 +136,9 @@ static void App_Measure_HandleSample(App_Measure_t *measure)
     if (measure->tare_running != 0U)
     {
         App_Measure_CollectTareSample(measure, raw);
-        return;
     }
 
-    if (measure->output_enabled != 0U)
-    {
-        App_Measure_EmitSample(measure, raw);
-    }
+    App_Measure_ProcessSample(measure, raw);
 }
 
 static void App_Measure_CollectTareSample(App_Measure_t *measure, int32_t raw)
@@ -179,7 +169,7 @@ static void App_Measure_ReportTareDone(App_Measure_t *measure)
     App_Report_Printf("Send 0 to start zero-corrected output\r\n");
 }
 
-static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw)
+static void App_Measure_ProcessSample(App_Measure_t *measure, int32_t raw)
 {
     float   vofa_values[APP_VOFA_CHANNELS];
     int32_t corrected_raw;
@@ -211,6 +201,21 @@ static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw)
     else
         filtered_raw = (int32_t)(filtered_value - 0.5f);
 
+    measure->latest.raw_code = raw;
+    measure->latest.raw_voltage_mv =
+        ADS1220_RawToVoltage(raw, APP_VREF_MV,
+                             ADS1220_GetGainValue(measure->hads));
+    measure->latest.filtered_code = filtered_raw;
+    measure->latest.filtered_voltage_mv =
+        ADS1220_RawToVoltage(filtered_raw, APP_VREF_MV,
+                             ADS1220_GetGainValue(measure->hads));
+    measure->latest.sample_tick = HAL_GetTick();
+    measure->latest.sample_count++;
+    measure->latest.valid = 1U;
+
+    if (measure->output_enabled == 0U)
+        return;
+
     vofa_values[APP_VOFA_CH_RAW]      = (float)raw;
     vofa_values[APP_VOFA_CH_TARED]    = (float)corrected_raw;
     vofa_values[APP_VOFA_CH_FILTERED] = (float)filtered_raw;
@@ -218,10 +223,7 @@ static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw)
     /* 比例式接法下基准即电桥激励，可直接换算为差分电压(mV)：
      *   Vdiff = raw * Vref / (gain * 2^23)
      * 用与 CH3 相同的滤波后码值换算，方便与 CH3 直接对照。 */
-    vofa_values[APP_VOFA_CH_MV] =
-        ADS1220_RawToVoltage(filtered_raw,
-                             APP_VREF_MV,
-                             ADS1220_GetGainValue(measure->hads));
+    vofa_values[APP_VOFA_CH_MV] = measure->latest.filtered_voltage_mv;
 
     /* 诊断通道：每秒刷新一次，帧间保持不变，上位机看到阶梯状。
      * 这些值让固件自证"实际输出速率"，不必再靠上位机抓包反推。 */
@@ -236,6 +238,13 @@ static void App_Measure_EmitSample(App_Measure_t *measure, int32_t raw)
     {
         measure->frames_in_window++;
     }
+}
+
+void App_Measure_GetLatest(const App_Measure_t *measure,
+                          App_Measure_Snapshot_t *snapshot)
+{
+    if (measure != NULL && snapshot != NULL)
+        *snapshot = measure->latest;
 }
 
 void App_Measure_NoteLoopPeriod(App_Measure_t *measure, uint32_t period_ms)

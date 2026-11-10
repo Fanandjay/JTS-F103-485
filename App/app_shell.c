@@ -7,7 +7,7 @@
  *   USART1 中断 → HAL_UART_RxCpltCallback → 组帧（行缓冲/单字符命令）
  *   → App_Shell_Poll（主循环）→ 命令表分发 → 注册的处理函数
  *
- * 注意：本文件定义了 HAL 的串口回调，因为接收缓冲的归属方是本模块。
+ * HAL 串口回调由 app.c 统一分发，避免 USART1/USART2 重复定义回调。
  ******************************************************************************
  */
 
@@ -125,7 +125,7 @@ void App_Shell_Poll(void)
     App_Report_Printf("Unknown command\r\n");
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void App_Shell_OnRxComplete(UART_HandleTypeDef *huart)
 {
     if (huart != s_huart)
         return;
@@ -168,7 +168,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     HAL_UART_Receive_IT(s_huart, &s_rx_byte, 1U);
 }
 
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+void App_Shell_OnError(UART_HandleTypeDef *huart)
 {
     if (huart != s_huart)
         return;
